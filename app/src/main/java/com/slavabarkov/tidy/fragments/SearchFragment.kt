@@ -14,6 +14,7 @@ import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.ScaleGestureDetector
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.TextView
@@ -24,6 +25,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.appcompat.app.AlertDialog
 import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.viewmodels.ORTTextViewModel
@@ -44,12 +46,15 @@ class SearchFragment : Fragment() {
     private var imageSimilaritySeekBar: SeekBar? = null
     private var imageSimilarityValue: TextView? = null
     private var indexFoldersButton: Button? = null
+    private var backToAllImagesButton: Button? = null
     private var selectionActions: View? = null
     private var selectedCountText: TextView? = null
     private var moveSelectedButton: Button? = null
     private var deleteSelectedButton: Button? = null
     private var clearSelectionButton: Button? = null
     private var imageAdapter: ImageAdapter? = null
+    private var scaleGestureDetector: ScaleGestureDetector? = null
+    private var accumulatedScale: Float = 1.0f
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -119,6 +124,10 @@ class SearchFragment : Fragment() {
     ): View? {
         val view = inflater.inflate(R.layout.fragment_search, container, false)
         val recyclerView = view.findViewById<RecyclerView>(R.id.recycler_view)
+        val gridLayoutManager = (recyclerView.layoutManager as? GridLayoutManager)
+            ?: GridLayoutManager(requireContext(), 3).also { recyclerView.layoutManager = it }
+        setupPinchToZoom(recyclerView, gridLayoutManager)
+
         val initialResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
         mSearchViewModel.searchResults = initialResults
         setResults(recyclerView, initialResults)
@@ -163,7 +172,18 @@ class SearchFragment : Fragment() {
         moveSelectedButton = view.findViewById(R.id.moveSelectedButton)
         deleteSelectedButton = view.findViewById(R.id.deleteSelectedButton)
         clearSelectionButton = view.findViewById(R.id.clearSelectionButton)
+        backToAllImagesButton = view.findViewById(R.id.backToAllImagesButton)
         updateSelectionUI()
+
+        backToAllImagesButton?.setOnClickListener {
+            mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
+            mSearchViewModel.lastSearchIsImageSearch = false
+            mSearchViewModel.lastSearchEmbedding = null
+            mSearchViewModel.clearSelection()
+            imageAdapter?.clearSelection()
+            setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+            recyclerView.scrollToPosition(0)
+        }
 
         deleteSelectedButton?.setOnClickListener {
             val ids = mSearchViewModel.selectedImageIds.toList()
@@ -210,9 +230,53 @@ class SearchFragment : Fragment() {
         clearButton?.setOnClickListener{
             searchText?.text = null
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
+            mSearchViewModel.lastSearchIsImageSearch = false
+            mSearchViewModel.lastSearchEmbedding = null
             setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
         }
         return view
+    }
+
+    private fun setupPinchToZoom(recyclerView: RecyclerView, gridLayoutManager: GridLayoutManager) {
+        // Discrete zoom steps: fewer columns = larger thumbnails, more columns = smaller thumbnails.
+        val minSpanCount = 2
+        val maxSpanCount = 6
+        accumulatedScale = 1.0f
+
+        scaleGestureDetector = ScaleGestureDetector(
+            requireContext(),
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    accumulatedScale *= detector.scaleFactor
+                    var spanCount = gridLayoutManager.spanCount
+
+                    // Zoom in: scale > 1 => decrease columns
+                    while (accumulatedScale > 1.20f && spanCount > minSpanCount) {
+                        spanCount -= 1
+                        accumulatedScale /= 1.20f
+                    }
+                    // Zoom out: scale < 1 => increase columns
+                    while (accumulatedScale < 0.83f && spanCount < maxSpanCount) {
+                        spanCount += 1
+                        accumulatedScale /= 0.83f
+                    }
+
+                    if (spanCount != gridLayoutManager.spanCount) {
+                        val firstVisible =
+                            gridLayoutManager.findFirstVisibleItemPosition().coerceAtLeast(0)
+                        gridLayoutManager.spanCount = spanCount
+                        recyclerView.post { recyclerView.scrollToPosition(firstVisible) }
+                    }
+
+                    return true
+                }
+            }
+        )
+
+        recyclerView.setOnTouchListener { _, event ->
+            scaleGestureDetector?.onTouchEvent(event)
+            false
+        }
     }
 
     private fun showIndexFoldersDialog() {
@@ -310,21 +374,79 @@ class SearchFragment : Fragment() {
         val allowed = results.toHashSet()
         mSearchViewModel.selectedImageIds.retainAll(allowed)
 
+        val showDimensions = mSearchViewModel.lastSearchIsImageSearch
         imageAdapter = ImageAdapter(
             requireContext(),
             results,
             mSearchViewModel.selectedImageIds,
-        ) {
-            updateSelectionUI()
-        }
+            onSelectionChanged = { updateSelectionUI() },
+            showDimensions = showDimensions,
+            dimensionsById = mSearchViewModel.imageDimensionsById
+        )
         recyclerView.adapter = imageAdapter
         updateSelectionUI()
+
+        if (showDimensions) {
+            loadDimensionsIfNeeded(results)
+        }
+    }
+
+    private fun loadDimensionsIfNeeded(results: List<Long>) {
+        val missingIds = results.filter { !mSearchViewModel.imageDimensionsById.containsKey(it) }
+        if (missingIds.isEmpty()) return
+
+        val ctx = context ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val dims = queryDimensions(ctx, missingIds)
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                mSearchViewModel.imageDimensionsById.putAll(dims)
+                imageAdapter?.notifyDataSetChanged()
+            }
+        }
+    }
+
+    private fun queryDimensions(
+        ctx: android.content.Context,
+        ids: List<Long>
+    ): Map<Long, String> {
+        val contentResolver = ctx.contentResolver
+        val result = linkedMapOf<Long, String>()
+
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.MediaColumns.WIDTH,
+            MediaStore.MediaColumns.HEIGHT
+        )
+
+        // Query in chunks to avoid overly long SQL "IN (...)" clauses.
+        val chunkSize = 500
+        val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        for (chunk in ids.chunked(chunkSize)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val selection = "${MediaStore.Images.Media._ID} IN ($placeholders)"
+            val selectionArgs = chunk.map { it.toString() }.toTypedArray()
+            contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val wCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.WIDTH)
+                val hCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.HEIGHT)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val w = cursor.getInt(wCol)
+                    val h = cursor.getInt(hCol)
+                    if (w > 0 && h > 0) result[id] = "${w}x${h}"
+                }
+            }
+        }
+        return result
     }
 
     private fun updateSelectionUI() {
         val count = mSearchViewModel.selectedImageIds.size
         selectedCountText?.text = "Selected: $count"
         selectionActions?.visibility = if (count > 0) View.VISIBLE else View.GONE
+        backToAllImagesButton?.visibility =
+            if (mSearchViewModel.lastSearchIsImageSearch) View.VISIBLE else View.GONE
     }
 
     private fun startDelete(ids: List<Long>) {

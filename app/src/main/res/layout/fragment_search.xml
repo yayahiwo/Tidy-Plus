@@ -90,6 +90,15 @@
         android:layout_height="wrap_content"
         android:max="100" />
 
+    <Button
+        android:id="@+id/backToAllImagesButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:text="Back to all images"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/selectionActions"
         android:layout_width="match_parent"

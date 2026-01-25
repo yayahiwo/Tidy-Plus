@@ -57,9 +57,23 @@
         android:id="@+id/singeImageView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="83"
+        android:layout_weight="73"
         android:background="#f3f3f3"
         tools:src="@tools:sample/avatars" />
+
+    <TextView
+        android:id="@+id/imageInfoTextView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="10"
+        android:ellipsize="end"
+        android:gravity="start|center_vertical"
+        android:maxLines="3"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
+        android:text="Location: …\nSize: …\nDimensions: …"
+        android:textColor="#8A000000"
+        android:textSize="12sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -70,12 +84,24 @@
         android:paddingTop="7dp">
 
         <Button
+            android:id="@+id/buttonBackToAllImages"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="BACK" />
+
+        <Space
+            android:layout_width="10dp"
+            android:layout_height="wrap_content" />
+
+        <Button
             android:id="@+id/buttonImage2Image"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="Image to Image Search" />
+            android:text="Find Similar Images" />
 
     </LinearLayout>
 

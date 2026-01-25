@@ -13,6 +13,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentTransaction
 import androidx.recyclerview.widget.RecyclerView
@@ -27,6 +28,8 @@ class ImageAdapter(
     private val dataset: List<Long>,
     private val selectedIds: MutableSet<Long> = linkedSetOf(),
     private val onSelectionChanged: ((selectedCount: Int) -> Unit)? = null,
+    private val showDimensions: Boolean = false,
+    private val dimensionsById: Map<Long, String> = emptyMap(),
 ) :
     RecyclerView.Adapter<ImageAdapter.ImageViewHolder>() {
     private val uri: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -36,6 +39,7 @@ class ImageAdapter(
         val imageView: ImageView = view.findViewById(R.id.item_image)
         val checkBox: CheckBox = view.findViewById(R.id.item_checkbox)
         val selectionOverlay: View = view.findViewById(R.id.item_selection_overlay)
+        val dimensionsText: TextView = view.findViewById(R.id.item_dimensions)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHolder {
@@ -53,6 +57,18 @@ class ImageAdapter(
         val imageUri = Uri.withAppendedPath(uri, item.toString())
 
         Glide.with(context).load(imageUri).thumbnail().into(holder.imageView)
+
+        if (showDimensions) {
+            val dims = dimensionsById[item]
+            if (dims.isNullOrBlank()) {
+                holder.dimensionsText.visibility = View.GONE
+            } else {
+                holder.dimensionsText.text = dims
+                holder.dimensionsText.visibility = View.VISIBLE
+            }
+        } else {
+            holder.dimensionsText.visibility = View.GONE
+        }
 
         val isSelected = selectedIds.contains(item)
         holder.checkBox.visibility = if (selectionMode) View.VISIBLE else View.GONE
@@ -88,7 +104,6 @@ class ImageAdapter(
             val transaction: FragmentTransaction = activity.supportFragmentManager.beginTransaction()
             val fragment = ImageFragment()
             fragment.arguments = arguments
-            transaction.addToBackStack("search_fragment")
             transaction.replace(R.id.fragmentContainerView, fragment)
             transaction.addToBackStack("image_fragment")
             transaction.commit()
