@@ -64,7 +64,9 @@ class ImageFragment : Fragment() {
                 mSearchViewModel.sortByCosineDistance(
                     imageEmbedding,
                     mORTImageViewModel.embeddingsList,
-                    mORTImageViewModel.idxList
+                    mORTImageViewModel.idxList,
+                    minSimilarity = mSearchViewModel.getImageSimilarityThreshold(),
+                    isImageSearch = true
                 )
             }
             mSearchViewModel.fromImg2ImgFlag = true

@@ -24,5 +24,12 @@
         tools:layout_editor_absoluteX="77dp"
         tools:layout_editor_absoluteY="411dp" />
 
+    <TextView
+        android:id="@+id/indexedCountText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ems="10"
+        android:gravity="center"
+        android:text="Indexed photos: 0" />
 
 </LinearLayout>

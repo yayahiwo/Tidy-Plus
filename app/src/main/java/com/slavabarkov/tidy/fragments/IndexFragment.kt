@@ -22,6 +22,7 @@ import com.slavabarkov.tidy.R
 class IndexFragment : Fragment() {
     private var progressBarView: ProgressBar? = null
     private var progressBarTextView: TextView? = null
+    private var indexedCountTextView: TextView? = null
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
 
     private val permissionsRequest: ActivityResultLauncher<String> = registerForActivityResult(
@@ -50,6 +51,7 @@ class IndexFragment : Fragment() {
 
         progressBarView = view.findViewById(R.id.progressBar)
         progressBarTextView = view.findViewById(R.id.progressBarText)
+        indexedCountTextView = view.findViewById(R.id.indexedCountText)
 
         mORTImageViewModel.progress.observe(viewLifecycleOwner) { progress ->
             var progressPercent: Int = (progress * 100).toInt()
@@ -60,6 +62,10 @@ class IndexFragment : Fragment() {
                 activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 findNavController().navigate(R.id.action_indexFragment_to_searchFragment)
             }
+        }
+
+        mORTImageViewModel.indexedCount.observe(viewLifecycleOwner) { count ->
+            indexedCountTextView?.text = "Indexed photos: $count"
         }
         return view
     }

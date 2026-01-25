@@ -1,16 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical">
+    android:layout_height="wrap_content">
 
     <ImageView
         android:id="@+id/item_image"
         android:layout_width="match_parent"
         android:layout_height="150dp"
-        android:padding="4dp"
         android:importantForAccessibility="no"
+        android:padding="4dp"
         android:scaleType="centerCrop" />
-</LinearLayout>
+
+    <View
+        android:id="@+id/item_selection_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="150dp"
+        android:background="#66000000"
+        android:visibility="gone" />
+
+    <CheckBox
+        android:id="@+id/item_checkbox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:padding="8dp"
+        android:visibility="gone" />
+</FrameLayout>
 

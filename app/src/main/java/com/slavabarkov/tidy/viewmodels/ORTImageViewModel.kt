@@ -15,6 +15,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.*
 import com.slavabarkov.tidy.R
+import com.slavabarkov.tidy.TidySettings
 import com.slavabarkov.tidy.centerCrop
 import com.slavabarkov.tidy.data.ImageEmbedding
 import com.slavabarkov.tidy.data.ImageEmbeddingDatabase
@@ -31,6 +32,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     var idxList: ArrayList<Long> = arrayListOf()
     var embeddingsList: ArrayList<FloatArray> = arrayListOf()
     var progress: MutableLiveData<Double> = MutableLiveData(0.0)
+    var indexedCount: MutableLiveData<Int> = MutableLiveData(0)
 
     init {
         val imageEmbeddingDao = ImageEmbeddingDatabase.getDatabase(application).imageEmbeddingDao()
@@ -38,6 +40,9 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun generateIndex() {
+        idxList.clear()
+        embeddingsList.clear()
+
         val modelID = R.raw.visual_quant
         val resources = getApplication<Application>().resources
         val model = resources.openRawResource(modelID).readBytes()
@@ -45,16 +50,39 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch(Dispatchers.Main) {
             progress.value = 0.0
+            indexedCount.value = 0
             val uri: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.DATE_MODIFIED,
-                MediaStore.Images.Media.BUCKET_DISPLAY_NAME
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+                MediaStore.Images.Media.BUCKET_ID
             )
             val sortOrder = "${MediaStore.Images.Media._ID} ASC"
             val contentResolver: ContentResolver = getApplication<Application>().contentResolver
-            val cursor: Cursor? = contentResolver.query(uri, projection, null, null, sortOrder)
+
+            val prefs = getApplication<Application>().getSharedPreferences(
+                TidySettings.PREFS_NAME,
+                android.content.Context.MODE_PRIVATE
+            )
+            val bucketIds: Set<String> =
+                prefs.getStringSet(TidySettings.KEY_INDEXED_BUCKET_IDS, emptySet())?.toSet()
+                    ?: emptySet()
+            val selection: String?
+            val selectionArgs: Array<String>?
+            if (bucketIds.isEmpty()) {
+                selection = null
+                selectionArgs = null
+            } else {
+                val placeholders = bucketIds.joinToString(",") { "?" }
+                selection = "${MediaStore.Images.Media.BUCKET_ID} IN ($placeholders)"
+                selectionArgs = bucketIds.toTypedArray()
+            }
+
+            val cursor: Cursor? =
+                contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
             val totalImages = cursor?.count ?: 0
+            val desiredIds: HashSet<Long> = hashSetOf()
             cursor?.use {
                 val idColumn: Int = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val dateColumn: Int =
@@ -67,10 +95,12 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                     val bucket: String = it.getString(bucketColumn)
                     // Don't add screenshots to image index
                     if (bucket == "Screenshots") continue
-                    val record = repository.getRecord(id) as ImageEmbedding?
+                    desiredIds.add(id)
+                    val record = repository.getRecord(id)
                     if (record != null) {
                         idxList.add(record.id)
                         embeddingsList.add(record.embedding)
+                        indexedCount.value = idxList.size
                     } else {
                         val imageUri: Uri = Uri.withAppendedPath(uri, id.toString())
                         val inputStream = contentResolver.openInputStream(imageUri)
@@ -101,6 +131,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                                     )
                                     idxList.add(id)
                                     embeddingsList.add(rawOutput)
+                                    indexedCount.value = idxList.size
 
                                 }
                             }
@@ -113,6 +144,33 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             cursor?.close()
             session.close()
             progress.setValue(1.0)
+
+            viewModelScope.launch(Dispatchers.IO) {
+                val existingIds = repository.getAllIds().toHashSet()
+                existingIds.removeAll(desiredIds)
+                if (existingIds.isNotEmpty()) repository.deleteByIds(existingIds.toList())
+            }
+        }
+    }
+
+    fun removeFromIndex(ids: List<Long>) {
+        if (ids.isEmpty()) return
+
+        val idsSet = ids.toHashSet()
+        val newIdxList = ArrayList<Long>(idxList.size)
+        val newEmbeddingsList = ArrayList<FloatArray>(embeddingsList.size)
+        for (i in idxList.indices) {
+            val id = idxList[i]
+            if (!idsSet.contains(id)) {
+                newIdxList.add(id)
+                newEmbeddingsList.add(embeddingsList[i])
+            }
+        }
+        idxList = newIdxList
+        embeddingsList = newEmbeddingsList
+
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteByIds(ids)
         }
     }
 }
