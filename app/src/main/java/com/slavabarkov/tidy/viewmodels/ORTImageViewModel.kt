@@ -23,7 +23,10 @@ import com.slavabarkov.tidy.data.ImageEmbeddingRepository
 import com.slavabarkov.tidy.normalizeL2
 import com.slavabarkov.tidy.preProcess
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.*
 
 class ORTImageViewModel(application: Application) : AndroidViewModel(application) {
@@ -33,6 +36,8 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     var embeddingsList: ArrayList<FloatArray> = arrayListOf()
     var progress: MutableLiveData<Double> = MutableLiveData(0.0)
     var indexedCount: MutableLiveData<Int> = MutableLiveData(0)
+    var isIndexing: MutableLiveData<Boolean> = MutableLiveData(false)
+    private var indexingJob: Job? = null
 
     init {
         val imageEmbeddingDao = ImageEmbeddingDatabase.getDatabase(application).imageEmbeddingDao()
@@ -40,17 +45,20 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun generateIndex() {
-        idxList.clear()
-        embeddingsList.clear()
+        indexingJob?.cancel()
+        indexingJob = viewModelScope.launch(Dispatchers.Default) {
+            isIndexing.postValue(true)
+            progress.postValue(0.0)
+            indexedCount.postValue(0)
 
-        val modelID = R.raw.visual_quant
-        val resources = getApplication<Application>().resources
-        val model = resources.openRawResource(modelID).readBytes()
-        val session = ortEnv.createSession(model)
+            val modelID = R.raw.visual_quant
+            val resources = getApplication<Application>().resources
+            val model = resources.openRawResource(modelID).readBytes()
+            val session = ortEnv.createSession(model)
 
-        viewModelScope.launch(Dispatchers.Main) {
-            progress.value = 0.0
-            indexedCount.value = 0
+            val newIdxList = ArrayList<Long>()
+            val newEmbeddingsList = ArrayList<FloatArray>()
+
             val uri: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
@@ -83,72 +91,86 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
             val totalImages = cursor?.count ?: 0
             val desiredIds: HashSet<Long> = hashSetOf()
-            cursor?.use {
-                val idColumn: Int = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                val dateColumn: Int =
-                    it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
-                val bucketColumn: Int =
-                    it.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
-                while (it.moveToNext()) {
-                    val id: Long = it.getLong(idColumn)
-                    val date: Long = it.getLong(dateColumn)
-                    val bucket: String = it.getString(bucketColumn)
-                    // Don't add screenshots to image index
-                    if (bucket == "Screenshots") continue
-                    desiredIds.add(id)
-                    val record = repository.getRecord(id)
-                    if (record != null) {
-                        idxList.add(record.id)
-                        embeddingsList.add(record.embedding)
-                        indexedCount.value = idxList.size
-                    } else {
-                        val imageUri: Uri = Uri.withAppendedPath(uri, id.toString())
-                        val inputStream = contentResolver.openInputStream(imageUri)
-                        val bytes = inputStream?.readBytes()
-                        inputStream?.close()
+            try {
+                cursor?.use {
+                    val idColumn: Int = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                    val dateColumn: Int =
+                        it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+                    val bucketColumn: Int =
+                        it.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                    while (it.moveToNext()) {
+                        if (!isActive) return@use
 
-                        // Can fail to create the image decoder if its not implemented for the image type
-                        val bitmap: Bitmap? =
-                            BitmapFactory.decodeByteArray(bytes, 0, bytes?.size ?: 0)
-                        bitmap?.let {
-                            val rawBitmap = centerCrop(bitmap, 224)
-                            val inputShape = longArrayOf(1, 3, 224, 224)
-                            val inputName = "pixel_values"
-                            val imgData = preProcess(rawBitmap)
-                            val inputTensor = OnnxTensor.createTensor(ortEnv, imgData, inputShape)
+                        val id: Long = it.getLong(idColumn)
+                        val date: Long = it.getLong(dateColumn)
+                        val bucket: String = it.getString(bucketColumn)
+                        // Don't add screenshots to image index
+                        if (bucket == "Screenshots") continue
+                        desiredIds.add(id)
+                        val record = repository.getRecord(id)
+                        if (record != null) {
+                            newIdxList.add(record.id)
+                            newEmbeddingsList.add(record.embedding)
+                            indexedCount.postValue(newIdxList.size)
+                        } else {
+                            val imageUri: Uri = Uri.withAppendedPath(uri, id.toString())
+                            val inputStream = contentResolver.openInputStream(imageUri)
+                            val bytes = inputStream?.readBytes()
+                            inputStream?.close()
 
-                            inputTensor.use {
-                                val output =
-                                    session?.run(Collections.singletonMap(inputName, inputTensor))
-                                output.use {
-                                    @Suppress("UNCHECKED_CAST") var rawOutput =
-                                        ((output?.get(0)?.value) as Array<FloatArray>)[0]
-                                    rawOutput = normalizeL2(rawOutput)
-                                    repository.addImageEmbedding(
-                                        ImageEmbedding(
-                                            id, date, rawOutput
+                            // Can fail to create the image decoder if its not implemented for the image type
+                            val bitmap: Bitmap? =
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes?.size ?: 0)
+                            bitmap?.let {
+                                val rawBitmap = centerCrop(bitmap, 224)
+                                val inputShape = longArrayOf(1, 3, 224, 224)
+                                val inputName = "pixel_values"
+                                val imgData = preProcess(rawBitmap)
+                                val inputTensor = OnnxTensor.createTensor(ortEnv, imgData, inputShape)
+
+                                inputTensor.use {
+                                    val output =
+                                        session.run(Collections.singletonMap(inputName, inputTensor))
+                                    output.use {
+                                        @Suppress("UNCHECKED_CAST") var rawOutput =
+                                            ((output[0].value) as Array<FloatArray>)[0]
+                                        rawOutput = normalizeL2(rawOutput)
+                                        repository.addImageEmbedding(
+                                            ImageEmbedding(
+                                                id, date, rawOutput
+                                            )
                                         )
-                                    )
-                                    idxList.add(id)
-                                    embeddingsList.add(rawOutput)
-                                    indexedCount.value = idxList.size
-
+                                        newIdxList.add(id)
+                                        newEmbeddingsList.add(rawOutput)
+                                        indexedCount.postValue(newIdxList.size)
+                                    }
                                 }
                             }
                         }
+                        // Record created/loaded, update progress
+                        if (totalImages > 0) {
+                            progress.postValue(it.position.toDouble() / totalImages.toDouble())
+                        }
                     }
-                    // Record created/loaded, update progress
-                    progress.value = it.position.toDouble() / totalImages.toDouble()
                 }
-            }
-            cursor?.close()
-            session.close()
-            progress.setValue(1.0)
 
-            viewModelScope.launch(Dispatchers.IO) {
-                val existingIds = repository.getAllIds().toHashSet()
-                existingIds.removeAll(desiredIds)
-                if (existingIds.isNotEmpty()) repository.deleteByIds(existingIds.toList())
+                if (isActive) {
+                    withContext(Dispatchers.Main) {
+                        idxList = newIdxList
+                        embeddingsList = newEmbeddingsList
+                    }
+                    progress.postValue(1.0)
+
+                    viewModelScope.launch(Dispatchers.IO) {
+                        val existingIds = repository.getAllIds().toHashSet()
+                        existingIds.removeAll(desiredIds)
+                        if (existingIds.isNotEmpty()) repository.deleteByIds(existingIds.toList())
+                    }
+                }
+            } finally {
+                cursor?.close()
+                session.close()
+                isIndexing.postValue(false)
             }
         }
     }

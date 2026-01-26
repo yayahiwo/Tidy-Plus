@@ -15,6 +15,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     var fromImg2ImgFlag: Boolean = false
     var lastSearchEmbedding: FloatArray? = null
     var lastSearchIsImageSearch: Boolean = false
+    var pendingIndexRefresh: Boolean = false
     val selectedImageIds: LinkedHashSet<Long> = linkedSetOf()
     val imageDimensionsById: LinkedHashMap<Long, String> = linkedMapOf()
     var similaritySortActive: Boolean = false

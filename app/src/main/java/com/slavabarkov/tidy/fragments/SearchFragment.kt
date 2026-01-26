@@ -69,7 +69,6 @@ class SearchFragment : Fragment() {
     private var reindexProgressText: TextView? = null
     private var reindexProgressBar: ProgressBar? = null
     private var reindexCountText: TextView? = null
-    private var isReindexing: Boolean = false
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -156,6 +155,16 @@ class SearchFragment : Fragment() {
         reindexCountText = view.findViewById(R.id.reindexCountText)
         imageCountText = view.findViewById(R.id.imageCountText)
 
+        if (mSearchViewModel.pendingIndexRefresh) {
+            reindexProgressContainer?.visibility = View.VISIBLE
+            recyclerView.isEnabled = false
+            val p = mORTImageViewModel.progress.value ?: 0.0
+            val progressPercent: Int = (p * 100).toInt()
+            reindexProgressBar?.progress = progressPercent
+            reindexProgressText?.text = "Updating image index: ${progressPercent}%"
+            reindexCountText?.text = "Indexed photos: ${mORTImageViewModel.indexedCount.value ?: 0}"
+        }
+
         val initialResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
         mSearchViewModel.searchResults = initialResults
         setResults(recyclerView, initialResults)
@@ -196,7 +205,7 @@ class SearchFragment : Fragment() {
         })
 
         mORTImageViewModel.progress.observe(viewLifecycleOwner) { progress ->
-            if (!isReindexing) return@observe
+            if (!mSearchViewModel.pendingIndexRefresh) return@observe
             val progressPercent: Int = (progress * 100).toInt()
             reindexProgressBar?.progress = progressPercent
             reindexProgressText?.text = "Updating image index: ${progressPercent}%"
@@ -206,7 +215,7 @@ class SearchFragment : Fragment() {
         }
 
         mORTImageViewModel.indexedCount.observe(viewLifecycleOwner) { count ->
-            if (!isReindexing) return@observe
+            if (!mSearchViewModel.pendingIndexRefresh) return@observe
             reindexCountText?.text = "Indexed photos: $count"
         }
 
@@ -290,7 +299,7 @@ class SearchFragment : Fragment() {
     }
 
     private fun toggleSimilaritySort() {
-        if (isReindexing) return
+        if (mORTImageViewModel.isIndexing.value == true) return
 
         val recyclerView = recyclerView ?: return
         val currentResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
@@ -522,7 +531,7 @@ class SearchFragment : Fragment() {
             return
         }
 
-        isReindexing = true
+        mSearchViewModel.pendingIndexRefresh = true
         reindexProgressContainer?.visibility = View.VISIBLE
         reindexProgressBar?.progress = 0
         reindexProgressText?.text = "Updating image index: 0%"
@@ -535,7 +544,7 @@ class SearchFragment : Fragment() {
     private fun finishReindex() {
         val recyclerView = recyclerView ?: return
 
-        isReindexing = false
+        mSearchViewModel.pendingIndexRefresh = false
         reindexProgressContainer?.visibility = View.GONE
         recyclerView.isEnabled = true
 
