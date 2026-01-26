@@ -14,7 +14,7 @@
 <ul>
 <li> Added image-to-image similarity threshold control (persisted) and applied it to “Find Similar” results filtering.</li>
 <li> Added multi-select in the grid (long-press to enter selection mode + checkboxes/overlay).</li>
-<li> Added bulk Delete for selected photos using Android’s system permission flow (MediaStore delete requests / recoverable permission).</li>
+<li> Added bulk Delete for selected photos using Android’s system permission flow (MediaStore delete requests/recoverable permission).</li>
 <li> Added bulk Move for selected photos using folder picker + write permission (updates RELATIVE_PATH; primary storage support).</li>
 <li> Added automatic index cleanup when photos are deleted (removes them from the Room CLIP index + in- memory lists).</li>
 <li> Added a persistent “folders to index” setting (by MediaStore buckets) and updated indexing to only index selected folders.</li>
