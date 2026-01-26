@@ -2,7 +2,7 @@
 
 <p>I needed the app to do a little bit more, with the help of AI i was able to add the folowing :</p>
 <ul>
-<li> Added image-to-image similarity threshold control (persisted) and applied it to “Find Similar” results filtering.<li>
+<li> Added image-to-image similarity threshold control (persisted) and applied it to “Find Similar” results filtering.</li>
 <li> Added multi-select in the grid (long-press to enter selection mode + checkboxes/overlay).</li>
 <li> Added bulk Delete for selected photos using Android’s system permission flow (MediaStore delete requests / recoverable permission).</li>
 <li> Added bulk Move for selected photos using folder picker + write permission (updates RELATIVE_PATH; primary storage support).</li>
