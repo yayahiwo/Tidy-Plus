@@ -1,4 +1,4 @@
-<H1>Thanks and Credit to https://github.com/slavabarkov for the orignal Tidy</H1>
+<H1>Thanks and Credit to https://github.com/slavabarkov for the original Tidy</H1>
 
 <p><b>Disclaimer 1</b>: I am not a java developer and can't even understand most of the code in this repository, and also very new to git, I just want to put this here if it's useful to anyone.</p>
 
