@@ -22,10 +22,29 @@
             android:inputType="textWebEditText|text" />
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:id="@+id/topButtonsRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center">
+            android:gravity="center_horizontal|center_vertical">
+
+            <Button
+                android:id="@+id/sortBySimilarityButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="Sort by similarity"
+                android:minHeight="48dp"
+                android:minWidth="48dp"
+                android:text=""
+                app:icon="@drawable/ic_sort"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="?attr/colorOnSurface" />
+
+            <Space
+                android:layout_width="10dp"
+                android:layout_height="wrap_content" />
 
             <Button
                 android:id="@+id/backToAllImagesButton"
@@ -98,38 +117,61 @@
                 app:iconPadding="0dp"
                 app:iconSize="24dp"
                 app:iconTint="?attr/colorOnSurface" />
+
+            <Space
+                android:layout_width="6dp"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/imageCountText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="Image count"
+                android:text="0"
+                android:textColor="?attr/colorOnSurface"
+                android:alpha="0.8"
+                android:textSize="14sp" />
         </LinearLayout>
 
 
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/imageSimilaritySection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingLeft="8dp"
-        android:paddingRight="8dp">
+        android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/imageSimilarityLabel"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Image search similarity threshold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp">
 
-        <TextView
-            android:id="@+id/imageSimilarityValue"
-            android:layout_width="wrap_content"
+            <TextView
+                android:id="@+id/imageSimilarityLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Image search similarity threshold" />
+
+            <TextView
+                android:id="@+id/imageSimilarityValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0.80" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/imageSimilaritySeekBar"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="0.80" />
+            android:paddingTop="20px"
+            android:paddingBottom="40px"
+            android:max="100" />
     </LinearLayout>
-
-    <SeekBar
-        android:id="@+id/imageSimilaritySeekBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:max="100" />
 
     <LinearLayout
         android:id="@+id/reindexProgressContainer"

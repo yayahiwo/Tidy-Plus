@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.slavabarkov.tidy.dot
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.viewmodels.ORTTextViewModel
 import com.slavabarkov.tidy.R
@@ -47,10 +48,14 @@ class SearchFragment : Fragment() {
     private var searchText: TextView? = null
     private var searchButton: Button? = null
     private var clearButton: Button? = null
+    private var topButtonsRow: View? = null
+    private var imageSimilaritySection: View? = null
     private var imageSimilaritySeekBar: SeekBar? = null
     private var imageSimilarityValue: TextView? = null
     private var indexFoldersButton: Button? = null
+    private var imageCountText: TextView? = null
     private var backToAllImagesButton: Button? = null
+    private var sortBySimilarityButton: Button? = null
     private var selectionActions: View? = null
     private var selectedCountText: TextView? = null
     private var moveSelectedButton: Button? = null
@@ -143,10 +148,13 @@ class SearchFragment : Fragment() {
         ensureGridSpacing(recyclerView)
         setupPinchToZoom(recyclerView, gridLayoutManager)
 
+        topButtonsRow = view.findViewById(R.id.topButtonsRow)
+        imageSimilaritySection = view.findViewById(R.id.imageSimilaritySection)
         reindexProgressContainer = view.findViewById(R.id.reindexProgressContainer)
         reindexProgressText = view.findViewById(R.id.reindexProgressText)
         reindexProgressBar = view.findViewById(R.id.reindexProgressBar)
         reindexCountText = view.findViewById(R.id.reindexCountText)
+        imageCountText = view.findViewById(R.id.imageCountText)
 
         val initialResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
         mSearchViewModel.searchResults = initialResults
@@ -208,16 +216,23 @@ class SearchFragment : Fragment() {
         deleteSelectedButton = view.findViewById(R.id.deleteSelectedButton)
         clearSelectionButton = view.findViewById(R.id.clearSelectionButton)
         backToAllImagesButton = view.findViewById(R.id.backToAllImagesButton)
+        sortBySimilarityButton = view.findViewById(R.id.sortBySimilarityButton)
         updateSelectionUI()
 
         backToAllImagesButton?.setOnClickListener {
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
             mSearchViewModel.lastSearchEmbedding = null
+            mSearchViewModel.similaritySortActive = false
+            mSearchViewModel.similaritySortBaseResults = null
             mSearchViewModel.clearSelection()
             imageAdapter?.clearSelection()
             setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
             recyclerView.scrollToPosition(0)
+        }
+
+        sortBySimilarityButton?.setOnClickListener {
+            toggleSimilaritySort()
         }
 
         deleteSelectedButton?.setOnClickListener {
@@ -267,9 +282,95 @@ class SearchFragment : Fragment() {
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
             mSearchViewModel.lastSearchEmbedding = null
+            mSearchViewModel.similaritySortActive = false
+            mSearchViewModel.similaritySortBaseResults = null
             setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
         }
         return view
+    }
+
+    private fun toggleSimilaritySort() {
+        if (isReindexing) return
+
+        val recyclerView = recyclerView ?: return
+        val currentResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
+
+        if (mSearchViewModel.similaritySortActive) {
+            val base = mSearchViewModel.similaritySortBaseResults
+            mSearchViewModel.similaritySortActive = false
+            mSearchViewModel.similaritySortBaseResults = null
+            mSearchViewModel.searchResults = base ?: mORTImageViewModel.idxList.reversed()
+            setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+            recyclerView.scrollToPosition(0)
+            return
+        }
+
+        // Use selected image(s) as the reference if any are selected; otherwise fall back to last search embedding.
+        val referenceEmbedding = buildReferenceEmbeddingFromSelection()
+            ?: mSearchViewModel.lastSearchEmbedding
+        if (referenceEmbedding == null) {
+            Toast.makeText(
+                requireContext(),
+                "Select image(s) or run a search first",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        mSearchViewModel.similaritySortActive = true
+        mSearchViewModel.similaritySortBaseResults = currentResults.toList()
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            val idToEmbedding = HashMap<Long, FloatArray>(mORTImageViewModel.idxList.size)
+            for (i in mORTImageViewModel.idxList.indices) {
+                idToEmbedding[mORTImageViewModel.idxList[i]] = mORTImageViewModel.embeddingsList[i]
+            }
+
+            val sorted = currentResults
+                .mapNotNull { id ->
+                    val emb = idToEmbedding[id] ?: return@mapNotNull null
+                    id to referenceEmbedding.dot(emb)
+                }
+                .sortedByDescending { it.second }
+                .map { it.first }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                if (!mSearchViewModel.similaritySortActive) return@withContext
+                mSearchViewModel.searchResults = sorted
+                setResults(recyclerView, sorted)
+                recyclerView.scrollToPosition(0)
+            }
+        }
+    }
+
+    private fun buildReferenceEmbeddingFromSelection(): FloatArray? {
+        val selected = mSearchViewModel.selectedImageIds.toList()
+        if (selected.isEmpty()) return null
+
+        val idToEmbedding = HashMap<Long, FloatArray>(mORTImageViewModel.idxList.size)
+        for (i in mORTImageViewModel.idxList.indices) {
+            idToEmbedding[mORTImageViewModel.idxList[i]] = mORTImageViewModel.embeddingsList[i]
+        }
+
+        val embeddings = selected.mapNotNull { idToEmbedding[it] }
+        if (embeddings.isEmpty()) return null
+
+        val dim = embeddings[0].size
+        val sum = FloatArray(dim)
+        for (emb in embeddings) {
+            if (emb.size != dim) return null
+            for (i in 0 until dim) sum[i] += emb[i]
+        }
+        for (i in 0 until dim) sum[i] /= embeddings.size.toFloat()
+
+        // Normalize for cosine similarity.
+        var norm = 0.0f
+        for (i in 0 until dim) norm += sum[i] * sum[i]
+        norm = kotlin.math.sqrt(norm)
+        if (norm <= 0f) return null
+        for (i in 0 until dim) sum[i] /= norm
+        return sum
     }
 
     private fun setupPinchToZoom(recyclerView: RecyclerView, gridLayoutManager: GridLayoutManager) {
@@ -473,8 +574,14 @@ class SearchFragment : Fragment() {
     private fun setResults(recyclerView: RecyclerView, results: List<Long>) {
         val allowed = results.toHashSet()
         mSearchViewModel.selectedImageIds.retainAll(allowed)
+        imageCountText?.text = results.size.toString()
 
         val showDimensions = mSearchViewModel.lastSearchIsImageSearch
+        imageSimilaritySection?.visibility = if (showDimensions) View.VISIBLE else View.GONE
+        topButtonsRow?.let { row ->
+            val bottomPaddingPx = if (showDimensions) 0 else 30
+            row.setPadding(row.paddingLeft, row.paddingTop, row.paddingRight, bottomPaddingPx)
+        }
         imageAdapter = ImageAdapter(
             requireContext(),
             results,

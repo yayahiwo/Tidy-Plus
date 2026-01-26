@@ -17,6 +17,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     var lastSearchIsImageSearch: Boolean = false
     val selectedImageIds: LinkedHashSet<Long> = linkedSetOf()
     val imageDimensionsById: LinkedHashMap<Long, String> = linkedMapOf()
+    var similaritySortActive: Boolean = false
+    var similaritySortBaseResults: List<Long>? = null
 
     private val prefs = application.getSharedPreferences(TidySettings.PREFS_NAME, Context.MODE_PRIVATE)
     private var imageSimilarityThreshold: Float =
