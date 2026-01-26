@@ -30,7 +30,7 @@
 </ul>
 <h2>Screenshots of the UI</h2>
 <div style="display:flex;">
-<img alt="Text-to-Image Search" src="res/tidy_plus_screens.jpg" width="100%">
+<img alt="Text-to-Image Search" src="res/tidy-plus-screens.jpg" width="100%">
 </div>
 
 Original Author Discription start:
