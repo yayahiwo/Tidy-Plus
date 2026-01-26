@@ -30,10 +30,7 @@
 </ul>
 <h2>Screenshots of the UI</h2>
 <div style="display:flex;">
-![Main view screen](https://github.com/user-attachments/assets/07ba2d5f-b2d4-44c4-bfcc-5e46bffee50c)
-![folder select screen](https://github.com/user-attachments/assets/e1daaac7-b43a-47c2-ab5d-6f5d75af7f94)
-![single image view screen](https://github.com/user-attachments/assets/2fb77eeb-21a8-43b0-832b-76522bc8c7b7)
-![similar result screen](https://github.com/user-attachments/assets/5a479ce0-269a-4409-8634-17098dff28bb)
+<img alt="Text-to-Image Search" src="res/tidy_plus_screens.jpg" width="50%"><img alt="Image-to-Image Search" src="res/image-to-image.jpg" width="50%">
 </div>
 
 Original Author Discription start:
