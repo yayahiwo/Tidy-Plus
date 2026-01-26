@@ -29,7 +29,8 @@
             android:fontFamily="sans-serif-medium"
             android:gravity="center"
             android:text="1 Jan, 2023"
-            android:textColor="#DE000000"
+            android:textColor="?attr/colorOnSurface"
+            android:alpha="0.87"
             android:textSize="20sp"
             android:typeface="normal" />
 
@@ -58,7 +59,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="73"
-        android:background="#f3f3f3"
+        android:background="@color/image_view_bg"
         tools:src="@tools:sample/avatars" />
 
     <TextView
@@ -72,7 +73,8 @@
         android:paddingLeft="12dp"
         android:paddingRight="12dp"
         android:text="Location: …\nSize: …\nDimensions: …"
-        android:textColor="#8A000000"
+        android:textColor="?attr/colorOnSurface"
+        android:alpha="0.7"
         android:textSize="12sp" />
 
     <LinearLayout
@@ -89,7 +91,11 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="BACK" />
+            android:text="BACK"
+            app:icon="@drawable/ic_clear"
+            app:iconPadding="8dp"
+            app:iconSize="20dp"
+            app:iconTint="?attr/colorOnSurface" />
 
         <Space
             android:layout_width="10dp"
@@ -101,7 +107,11 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="Find Similar Images" />
+            android:text="Find Similar"
+            app:icon="@drawable/ic_search"
+            app:iconPadding="8dp"
+            app:iconSize="20dp"
+            app:iconTint="?attr/colorOnSurface" />
 
     </LinearLayout>
 

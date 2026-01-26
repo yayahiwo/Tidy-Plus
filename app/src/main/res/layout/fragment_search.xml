@@ -22,17 +22,63 @@
             android:inputType="textWebEditText|text" />
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:id="@+id/topButtonsRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center">
+            android:gravity="center_horizontal|center_vertical">
+
+            <Button
+                android:id="@+id/sortBySimilarityButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="Sort by similarity"
+                android:minHeight="48dp"
+                android:minWidth="48dp"
+                android:text=""
+                app:icon="@drawable/ic_sort"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="?attr/colorOnSurface" />
+
+            <Space
+                android:layout_width="10dp"
+                android:layout_height="wrap_content" />
+
+            <Button
+                android:id="@+id/backToAllImagesButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="Back"
+                android:minHeight="48dp"
+                android:minWidth="48dp"
+                android:text=""
+                android:visibility="gone"
+                app:icon="@drawable/ic_arrow_back"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="?attr/colorOnSurface" />
+
+            <Space
+                android:layout_width="10dp"
+                android:layout_height="wrap_content"
+                />
 
             <Button
                 android:id="@+id/searchButton"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Search" />
+                android:contentDescription="Search"
+                android:minHeight="48dp"
+                android:minWidth="48dp"
+                android:text=""
+                app:icon="@drawable/ic_search"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="?attr/colorOnSurface" />
 
             <Space
                 android:layout_width="10dp"
@@ -44,7 +90,14 @@
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Clear" />
+                android:contentDescription="Clear"
+                android:minHeight="48dp"
+                android:minWidth="48dp"
+                android:text=""
+                app:icon="@drawable/ic_clear"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="?attr/colorOnSurface" />
 
             <Space
                 android:layout_width="10dp"
@@ -56,48 +109,102 @@
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Folders" />
+                android:contentDescription="Folders"
+                android:minHeight="48dp"
+                android:minWidth="48dp"
+                android:text=""
+                app:icon="@drawable/ic_folder"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="?attr/colorOnSurface" />
+
+            <Space
+                android:layout_width="6dp"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/imageCountText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:contentDescription="Image count"
+                android:text="0"
+                android:textColor="?attr/colorOnSurface"
+                android:alpha="0.8"
+                android:textSize="14sp" />
         </LinearLayout>
 
 
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/imageSimilaritySection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingLeft="8dp"
-        android:paddingRight="8dp">
+        android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/imageSimilarityLabel"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Image search similarity threshold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp">
 
-        <TextView
-            android:id="@+id/imageSimilarityValue"
-            android:layout_width="wrap_content"
+            <TextView
+                android:id="@+id/imageSimilarityLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Image search similarity threshold" />
+
+            <TextView
+                android:id="@+id/imageSimilarityValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0.80" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/imageSimilaritySeekBar"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="0.80" />
+            android:paddingTop="20px"
+            android:paddingBottom="40px"
+            android:max="100" />
     </LinearLayout>
 
-    <SeekBar
-        android:id="@+id/imageSimilaritySeekBar"
+    <LinearLayout
+        android:id="@+id/reindexProgressContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:max="100" />
+        android:orientation="vertical"
+        android:paddingLeft="12dp"
+        android:paddingRight="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
 
-    <Button
-        android:id="@+id/backToAllImagesButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:text="Back to all images"
-        android:visibility="gone" />
+        <TextView
+            android:id="@+id/reindexProgressText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Updating image index: 0%" />
+
+        <ProgressBar
+            android:id="@+id/reindexProgressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
+            android:progress="0" />
+
+        <TextView
+            android:id="@+id/reindexCountText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Indexed photos: 0" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/selectionActions"

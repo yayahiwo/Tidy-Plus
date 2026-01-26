@@ -12,5 +12,8 @@ object TidySettings {
 
     // Empty set => index all folders (except those explicitly excluded by the app, e.g. Screenshots)
     const val KEY_INDEXED_BUCKET_IDS = "indexed_bucket_ids"
-}
+    const val KEY_INDEX_FOLDERS_CONFIGURED = "index_folders_configured"
 
+    const val KEY_GRID_SPAN_COUNT = "grid_span_count"
+    const val DEFAULT_GRID_SPAN_COUNT = 3
+}
