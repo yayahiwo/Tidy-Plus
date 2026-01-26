@@ -29,6 +29,11 @@
 <li> Updated Gradle config so the project builds with AGP’s Java 17+ requirement (points Gradle to Android Studio’s bundled JDK).</li>
 </ul>
 <h2>Screenshots of the UI</h2>
+![main](https://github.com/user-attachments/assets/07ba2d5f-b2d4-44c4-bfcc-5e46bffee50c)
+![folder-select](https://github.com/user-attachments/assets/e1daaac7-b43a-47c2-ab5d-6f5d75af7f94)
+![single_image_view](https://github.com/user-attachments/assets/2fb77eeb-21a8-43b0-832b-76522bc8c7b7)
+![similar-result](https://github.com/user-attachments/assets/5a479ce0-269a-4409-8634-17098dff28bb)
+
 
 Original Author Discription start:
 ===================================
