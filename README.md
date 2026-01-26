@@ -10,7 +10,7 @@
   including actions such as deleting, moving, or modifying files/photos. Always review permissions and keep
   backups of important data before use.</p>
 
-<p>I needed the app to do a little bit more than the orignal Tidy to help me orgnize and clean my big image photo collection, And with the help of AI I was able to add the folowing functionalites:</p>
+<p>I needed the app to do a little bit more than the orignal Tidy to help me orgnize and clean my big photo collection, And with the help of AI I was able to add the folowing functionalites:</p>
 <ul>
 <li> Added image-to-image similarity threshold control (persisted) and applied it to “Find Similar” results filtering.</li>
 <li> Added multi-select in the grid (long-press to enter selection mode + checkboxes/overlay).</li>
