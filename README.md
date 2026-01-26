@@ -1,4 +1,4 @@
-<H1>Thanks to https://github.com/slavabarkov for hthe orignal Tidy</H1>
+<H1>Thanks to https://github.com/slavabarkov for the orignal Tidy</H1>
 <p>Disclaimer: This software is provided “AS IS”, without warranty of any kind, express or implied,
   including but not limited to warranties of merchantability, fitness for a particular purpose, and
   noninfringement. Use of this app and its source code is at your own risk. The author(s) and
