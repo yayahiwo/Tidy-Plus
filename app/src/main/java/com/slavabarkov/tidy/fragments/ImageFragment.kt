@@ -13,9 +13,11 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.GridLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.net.toUri
+import androidx.exifinterface.media.ExifInterface
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import com.bumptech.glide.Glide
@@ -35,6 +37,12 @@ class ImageFragment : Fragment() {
     private var dateTextView: TextView? = null
     private var infoTextView: TextView? = null
     private var singleImageView: PhotoView? = null
+    private var buttonExif: Button? = null
+    private var exifGrid: GridLayout? = null
+    private var showExif: Boolean = false
+    private var basicInfoText: String = ""
+    private var exifHeaderText: String? = null
+    private var exifGridItems: List<Pair<String, String>>? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -47,9 +55,13 @@ class ImageFragment : Fragment() {
             imageUri = it.getString("image_uri")?.toUri()
         }
 
+        showExif = savedInstanceState?.getBoolean("show_exif") ?: false
+
         dateTextView = view.findViewById(R.id.dateTextView)
         infoTextView = view.findViewById(R.id.imageInfoTextView)
         singleImageView = view.findViewById(R.id.singeImageView)
+        buttonExif = view.findViewById(R.id.buttonExif)
+        exifGrid = view.findViewById(R.id.imageExifGrid)
         singleImageView?.apply {
             // Explicitly enable and configure pinch-to-zoom.
             setZoomable(true)
@@ -88,6 +100,11 @@ class ImageFragment : Fragment() {
             parentFragmentManager.popBackStack()
         }
 
+        buttonExif?.setOnClickListener {
+            showExif = !showExif
+            updateInfoText()
+        }
+
         val buttonImage2Image: Button = view.findViewById(R.id.buttonImage2Image)
         buttonImage2Image.setOnClickListener {
             imageId?.let {
@@ -123,6 +140,11 @@ class ImageFragment : Fragment() {
         return view
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("show_exif", showExif)
+    }
+
     private fun showAdjacentImage(delta: Int) {
         val currentId = imageId ?: return
         val list = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
@@ -139,6 +161,8 @@ class ImageFragment : Fragment() {
     private fun showImageById(id: Long) {
         imageId = id
         imageUri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+        exifHeaderText = null
+        exifGridItems = null
 
         val ctx = context ?: return
         val cursor: Cursor? = ctx.contentResolver.query(imageUri!!, null, null, null, null)
@@ -187,7 +211,136 @@ class ImageFragment : Fragment() {
             "Unknown"
         }
         val sizeText = sizeBytes?.let { formatBytes(it) } ?: "Unknown"
-        infoTextView?.text = "Location: $location\nSize: $sizeText\nDimensions: $dimensions"
+
+        basicInfoText = "Location: $location\nSize: $sizeText\nDimensions: $dimensions"
+        updateInfoText()
+    }
+
+    private fun updateInfoText() {
+        if (!showExif) {
+            exifGrid?.visibility = View.GONE
+            infoTextView?.text = basicInfoText
+            return
+        }
+
+        val uri = imageUri
+        val ctx = context
+        if (uri == null || ctx == null) {
+            exifGrid?.visibility = View.GONE
+            infoTextView?.text = "No EXIF data"
+            return
+        }
+
+        if (exifHeaderText == null || exifGridItems == null) {
+            val (header, items) = loadExifDisplay(ctx, uri)
+            exifHeaderText = header
+            exifGridItems = items
+        }
+        val header = exifHeaderText ?: "No EXIF data"
+        val items = exifGridItems ?: emptyList()
+
+        infoTextView?.text = header
+        renderExifGrid(items)
+    }
+
+    private fun loadExifDisplay(
+        ctx: android.content.Context,
+        uri: Uri
+    ): Pair<String, List<Pair<String, String>>> {
+        return try {
+            val contentResolver = ctx.contentResolver
+            val exif = contentResolver.openInputStream(uri)?.use { input ->
+                ExifInterface(input)
+            } ?: return "No EXIF data" to emptyList()
+
+            fun cleaned(value: String?): String? = value?.trim()?.takeIf { it.isNotEmpty() }
+
+            val make = cleaned(exif.getAttribute(ExifInterface.TAG_MAKE))
+            val model = cleaned(exif.getAttribute(ExifInterface.TAG_MODEL))
+            val camera = listOfNotNull(make, model).joinToString(" ").takeIf { it.isNotBlank() }
+            val taken = cleaned(exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
+
+            val headerLines = ArrayList<String>(2)
+            if (camera != null) headerLines.add("Camera: $camera")
+            if (taken != null) headerLines.add("Taken: $taken")
+            val header = if (headerLines.isEmpty()) "No EXIF data" else headerLines.joinToString("\n")
+
+            val items = ArrayList<Pair<String, String>>(8)
+
+            cleaned(exif.getAttribute(ExifInterface.TAG_LENS_MODEL))?.let { items.add("Lens" to it) }
+
+            cleaned(exif.getAttribute(ExifInterface.TAG_F_NUMBER))?.let { raw ->
+                val v = if (raw.startsWith("f/")) raw else "f/$raw"
+                items.add("F" to v)
+            }
+
+            cleaned(exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME))?.let { raw ->
+                val v = if (raw.endsWith("s")) raw else "${raw}s"
+                items.add("Shutter" to v)
+            }
+
+            cleaned(exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY))?.let {
+                items.add("ISO" to it)
+            }
+
+            cleaned(exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH))?.let { raw ->
+                val v = if (raw.endsWith("mm")) raw else "${raw}mm"
+                items.add("Focal" to v)
+            }
+
+            val latLong = exif.latLong
+            if (latLong != null) {
+                val gps =
+                    "${String.format(java.util.Locale.US, "%.5f", latLong[0])}, ${
+                        String.format(java.util.Locale.US, "%.5f", latLong[1])
+                    }"
+                items.add("GPS" to gps)
+            }
+
+            header to items
+        } catch (_: Exception) {
+            "No EXIF data" to emptyList()
+        }
+    }
+
+    private fun renderExifGrid(items: List<Pair<String, String>>) {
+        val grid = exifGrid ?: return
+        val ctx = grid.context
+
+        grid.removeAllViews()
+        if (items.isEmpty() || !showExif) {
+            grid.visibility = View.GONE
+            return
+        }
+
+        val infoColor = infoTextView?.currentTextColor
+        val density = ctx.resources.displayMetrics.density
+        val colGapPx = (6 * density).toInt()
+        val rowGapPx = (2 * density).toInt()
+
+        items.forEachIndexed { index, (label, value) ->
+            val tv = TextView(ctx).apply {
+                text = "$label: $value"
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                alpha = 0.7f
+                if (infoColor != null) setTextColor(infoColor)
+            }
+
+            val col = index % 2
+            val lp = GridLayout.LayoutParams().apply {
+                width = 0
+                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                setMargins(
+                    if (col == 1) colGapPx else 0,
+                    rowGapPx,
+                    if (col == 0) colGapPx else 0,
+                    rowGapPx
+                )
+            }
+            grid.addView(tv, lp)
+        }
+
+        grid.visibility = View.VISIBLE
     }
 
     private fun formatBytes(bytes: Long): String {
