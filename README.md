@@ -33,7 +33,7 @@
 <img alt="Text-to-Image Search" src="res/tidy-plus-screens.jpg" width="100%">
 </div>
 
-Original Author Discription start:
+Original Author Discription:
 ===================================
 # TIDY - Text-to-Image Discovery
 <div style="display:flex;">
