@@ -26,6 +26,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         )
     private var indexedBucketIds: Set<String> =
         prefs.getStringSet(TidySettings.KEY_INDEXED_BUCKET_IDS, emptySet())?.toSet() ?: emptySet()
+    private var gridSpanCount: Int =
+        prefs.getInt(TidySettings.KEY_GRID_SPAN_COUNT, TidySettings.DEFAULT_GRID_SPAN_COUNT)
 
     fun getImageSimilarityThreshold(): Float = imageSimilarityThreshold
 
@@ -39,7 +41,18 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setIndexedBucketIds(value: Set<String>) {
         indexedBucketIds = value.toSet()
-        prefs.edit().putStringSet(TidySettings.KEY_INDEXED_BUCKET_IDS, indexedBucketIds).apply()
+        prefs.edit()
+            .putStringSet(TidySettings.KEY_INDEXED_BUCKET_IDS, indexedBucketIds)
+            .putBoolean(TidySettings.KEY_INDEX_FOLDERS_CONFIGURED, true)
+            .apply()
+    }
+
+    fun getGridSpanCount(): Int = gridSpanCount
+
+    fun setGridSpanCount(value: Int) {
+        val clamped = value.coerceIn(2, 24)
+        gridSpanCount = clamped
+        prefs.edit().putInt(TidySettings.KEY_GRID_SPAN_COUNT, clamped).apply()
     }
 
     fun sortByCosineDistance(searchEmbedding: FloatArray,

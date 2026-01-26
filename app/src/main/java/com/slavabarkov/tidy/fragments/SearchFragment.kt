@@ -8,6 +8,7 @@ import android.app.Activity
 import android.app.RecoverableSecurityException
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.MediaStore
@@ -15,7 +16,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ScaleGestureDetector
+import android.graphics.Rect
 import android.widget.Button
+import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -24,6 +27,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -55,6 +59,12 @@ class SearchFragment : Fragment() {
     private var imageAdapter: ImageAdapter? = null
     private var scaleGestureDetector: ScaleGestureDetector? = null
     private var accumulatedScale: Float = 1.0f
+    private var recyclerView: RecyclerView? = null
+    private var reindexProgressContainer: View? = null
+    private var reindexProgressText: TextView? = null
+    private var reindexProgressBar: ProgressBar? = null
+    private var reindexCountText: TextView? = null
+    private var isReindexing: Boolean = false
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -123,10 +133,20 @@ class SearchFragment : Fragment() {
         savedInstanceState: Bundle?,
     ): View? {
         val view = inflater.inflate(R.layout.fragment_search, container, false)
-        val recyclerView = view.findViewById<RecyclerView>(R.id.recycler_view)
+        recyclerView = view.findViewById(R.id.recycler_view)
+        val recyclerView = recyclerView!!
+
+        val initialSpanCount = mSearchViewModel.getGridSpanCount()
         val gridLayoutManager = (recyclerView.layoutManager as? GridLayoutManager)
-            ?: GridLayoutManager(requireContext(), 3).also { recyclerView.layoutManager = it }
+            ?: GridLayoutManager(requireContext(), initialSpanCount).also { recyclerView.layoutManager = it }
+        gridLayoutManager.spanCount = initialSpanCount
+        ensureGridSpacing(recyclerView)
         setupPinchToZoom(recyclerView, gridLayoutManager)
+
+        reindexProgressContainer = view.findViewById(R.id.reindexProgressContainer)
+        reindexProgressText = view.findViewById(R.id.reindexProgressText)
+        reindexProgressBar = view.findViewById(R.id.reindexProgressBar)
+        reindexCountText = view.findViewById(R.id.reindexCountText)
 
         val initialResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
         mSearchViewModel.searchResults = initialResults
@@ -166,6 +186,21 @@ class SearchFragment : Fragment() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
+
+        mORTImageViewModel.progress.observe(viewLifecycleOwner) { progress ->
+            if (!isReindexing) return@observe
+            val progressPercent: Int = (progress * 100).toInt()
+            reindexProgressBar?.progress = progressPercent
+            reindexProgressText?.text = "Updating image index: ${progressPercent}%"
+            if (progress == 1.0) {
+                finishReindex()
+            }
+        }
+
+        mORTImageViewModel.indexedCount.observe(viewLifecycleOwner) { count ->
+            if (!isReindexing) return@observe
+            reindexCountText?.text = "Indexed photos: $count"
+        }
 
         selectionActions = view.findViewById(R.id.selectionActions)
         selectedCountText = view.findViewById(R.id.selectedCountText)
@@ -240,7 +275,7 @@ class SearchFragment : Fragment() {
     private fun setupPinchToZoom(recyclerView: RecyclerView, gridLayoutManager: GridLayoutManager) {
         // Discrete zoom steps: fewer columns = larger thumbnails, more columns = smaller thumbnails.
         val minSpanCount = 2
-        val maxSpanCount = 6
+        val maxSpanCount = 24
         accumulatedScale = 1.0f
 
         scaleGestureDetector = ScaleGestureDetector(
@@ -265,6 +300,7 @@ class SearchFragment : Fragment() {
                         val firstVisible =
                             gridLayoutManager.findFirstVisibleItemPosition().coerceAtLeast(0)
                         gridLayoutManager.spanCount = spanCount
+                        mSearchViewModel.setGridSpanCount(spanCount)
                         recyclerView.post { recyclerView.scrollToPosition(firstVisible) }
                     }
 
@@ -276,6 +312,29 @@ class SearchFragment : Fragment() {
         recyclerView.setOnTouchListener { _, event ->
             scaleGestureDetector?.onTouchEvent(event)
             false
+        }
+    }
+
+    private fun ensureGridSpacing(recyclerView: RecyclerView) {
+        if (recyclerView.itemDecorationCount > 0) return
+
+        // 2px between items (1px on each side), plus 1px RecyclerView padding => 2px outer edge.
+        val spacingPx = 2
+        val half = spacingPx / 2
+        recyclerView.setPadding(half, half, half, half)
+        recyclerView.clipToPadding = false
+        recyclerView.addItemDecoration(UniformSpacingItemDecoration(half))
+    }
+
+    private class UniformSpacingItemDecoration(private val halfSpacePx: Int) :
+        RecyclerView.ItemDecoration() {
+        override fun getItemOffsets(
+            outRect: Rect,
+            view: View,
+            parent: RecyclerView,
+            state: RecyclerView.State,
+        ) {
+            outRect.set(halfSpacePx, halfSpacePx, halfSpacePx, halfSpacePx)
         }
     }
 
@@ -336,13 +395,54 @@ class SearchFragment : Fragment() {
                         mSearchViewModel.clearSelection()
                         imageAdapter?.clearSelection()
                         updateSelectionUI()
-
-                        findNavController().navigate(R.id.action_searchFragment_to_indexFragment)
+                        startReindex()
                     }
                     .setNegativeButton("Cancel", null)
                     .show()
             }
         }
+    }
+
+    private fun startReindex() {
+        val recyclerView = recyclerView ?: return
+
+        val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        val granted =
+            ContextCompat.checkSelfPermission(requireContext(), permission) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            Toast.makeText(requireContext(), "Grant photo access to re-index", Toast.LENGTH_SHORT)
+                .show()
+            val args = Bundle().apply { putBoolean("auto_start", true) }
+            findNavController().navigate(R.id.action_searchFragment_to_indexFragment, args)
+            return
+        }
+
+        isReindexing = true
+        reindexProgressContainer?.visibility = View.VISIBLE
+        reindexProgressBar?.progress = 0
+        reindexProgressText?.text = "Updating image index: 0%"
+        reindexCountText?.text = "Indexed photos: 0"
+
+        recyclerView.isEnabled = false
+        mORTImageViewModel.generateIndex()
+    }
+
+    private fun finishReindex() {
+        val recyclerView = recyclerView ?: return
+
+        isReindexing = false
+        reindexProgressContainer?.visibility = View.GONE
+        recyclerView.isEnabled = true
+
+        mSearchViewModel.lastSearchIsImageSearch = false
+        mSearchViewModel.lastSearchEmbedding = null
+        mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
+        setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+        recyclerView.scrollToPosition(0)
     }
 
     private fun queryImageBuckets(ctx: android.content.Context): List<Pair<Long, String>> {

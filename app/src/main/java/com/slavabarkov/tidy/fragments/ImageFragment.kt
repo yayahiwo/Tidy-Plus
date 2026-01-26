@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.net.toUri
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
@@ -31,6 +32,10 @@ class ImageFragment : Fragment() {
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
 
+    private var dateTextView: TextView? = null
+    private var infoTextView: TextView? = null
+    private var singleImageView: PhotoView? = null
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?,
@@ -42,55 +47,36 @@ class ImageFragment : Fragment() {
             imageUri = it.getString("image_uri")?.toUri()
         }
 
-        // Get image metadata from image URI
-        val cursor: Cursor =
-            requireContext().contentResolver.query(imageUri!!, null, null, null, null)!!
-        cursor.moveToFirst()
-
-        val dateIdx: Int = cursor.getColumnIndex(MediaStore.Images.ImageColumns.DATE_MODIFIED)
-        val date: Long =
-            if (dateIdx >= 0) cursor.getLong(dateIdx) * 1000 else System.currentTimeMillis()
-
-        val displayNameIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
-        val displayName: String? = if (displayNameIdx >= 0) cursor.getString(displayNameIdx) else null
-
-        val relativePathIdx = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
-        val relativePath: String? =
-            if (relativePathIdx >= 0) cursor.getString(relativePathIdx) else null
-
-        val dataPathIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
-        val dataPath: String? = if (dataPathIdx >= 0) cursor.getString(dataPathIdx) else null
-
-        val sizeIdx = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
-        val sizeBytes: Long? = if (sizeIdx >= 0) cursor.getLong(sizeIdx) else null
-
-        val widthIdx = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
-        val heightIdx = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
-        val width: Int? = if (widthIdx >= 0) cursor.getInt(widthIdx) else null
-        val height: Int? = if (heightIdx >= 0) cursor.getInt(heightIdx) else null
-
-        cursor.close()
-
-        val dateTextView: TextView = view.findViewById(R.id.dateTextView)
-        dateTextView.text = DateFormat.getDateInstance().format(date)
-
-        val singleImageView: PhotoView = view.findViewById(R.id.singeImageView)
-        Glide.with(view).load(imageUri).into(singleImageView)
-
-        val infoTextView: TextView = view.findViewById(R.id.imageInfoTextView)
-        val location = when {
-            !relativePath.isNullOrBlank() && !displayName.isNullOrBlank() -> relativePath + displayName
-            !relativePath.isNullOrBlank() -> relativePath
-            !dataPath.isNullOrBlank() -> dataPath
-            else -> imageUri.toString()
+        dateTextView = view.findViewById(R.id.dateTextView)
+        infoTextView = view.findViewById(R.id.imageInfoTextView)
+        singleImageView = view.findViewById(R.id.singeImageView)
+        singleImageView?.apply {
+            // Explicitly enable and configure pinch-to-zoom.
+            setZoomable(true)
+            minimumScale = 1.0f
+            mediumScale = 2.0f
+            maximumScale = 5.0f
         }
-        val dimensions = if (width != null && height != null && width > 0 && height > 0) {
-            "${width}×${height}px"
-        } else {
-            "Unknown"
+
+        // Don't override PhotoView's touch listener (it breaks pinch-to-zoom on some devices).
+        // Instead, hook into PhotoView's built-in fling callback for left/right navigation.
+        singleImageView?.setOnSingleFlingListener { e1, e2, velocityX, _ ->
+            val photoView = singleImageView ?: return@setOnSingleFlingListener false
+            // Only navigate when not zoomed in (otherwise swipes should pan the image).
+            if (photoView.scale > 1.05f) return@setOnSingleFlingListener false
+
+            val dx = e2.x - e1.x
+            val dy = e2.y - e1.y
+            if (kotlin.math.abs(dx) < kotlin.math.abs(dy)) return@setOnSingleFlingListener false
+            if (kotlin.math.abs(dx) < 120) return@setOnSingleFlingListener false
+            if (kotlin.math.abs(velocityX) < 400) return@setOnSingleFlingListener false
+
+            if (dx < 0) showAdjacentImage(+1) else showAdjacentImage(-1)
+            true
         }
-        val sizeText = sizeBytes?.let { formatBytes(it) } ?: "Unknown"
-        infoTextView.text = "Location: $location\nSize: $sizeText\nDimensions: $dimensions"
+
+        // Initial render
+        imageId?.let { showImageById(it) }
 
         val buttonBackToAllImages: Button = view.findViewById(R.id.buttonBackToAllImages)
         buttonBackToAllImages.setOnClickListener {
@@ -106,6 +92,11 @@ class ImageFragment : Fragment() {
         buttonImage2Image.setOnClickListener {
             imageId?.let {
                 val imageIndex = mORTImageViewModel.idxList.indexOf(it)
+                if (imageIndex < 0) {
+                    Toast.makeText(requireContext(), "Image is not indexed", Toast.LENGTH_SHORT)
+                        .show()
+                    return@setOnClickListener
+                }
                 val imageEmbedding = mORTImageViewModel.embeddingsList[imageIndex]
                 mSearchViewModel.sortByCosineDistance(
                     imageEmbedding,
@@ -130,6 +121,73 @@ class ImageFragment : Fragment() {
             startActivity(shareIntent)
         }
         return view
+    }
+
+    private fun showAdjacentImage(delta: Int) {
+        val currentId = imageId ?: return
+        val list = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
+        val idx = list.indexOf(currentId)
+        if (idx < 0) return
+        val nextIdx = idx + delta
+        if (nextIdx !in list.indices) {
+            Toast.makeText(requireContext(), "No more images", Toast.LENGTH_SHORT).show()
+            return
+        }
+        showImageById(list[nextIdx])
+    }
+
+    private fun showImageById(id: Long) {
+        imageId = id
+        imageUri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+
+        val ctx = context ?: return
+        val cursor: Cursor? = ctx.contentResolver.query(imageUri!!, null, null, null, null)
+        if (cursor == null || !cursor.moveToFirst()) {
+            cursor?.close()
+            return
+        }
+
+        val dateIdx: Int = cursor.getColumnIndex(MediaStore.Images.ImageColumns.DATE_MODIFIED)
+        val date: Long =
+            if (dateIdx >= 0) cursor.getLong(dateIdx) * 1000 else System.currentTimeMillis()
+
+        val displayNameIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+        val displayName: String? =
+            if (displayNameIdx >= 0) cursor.getString(displayNameIdx) else null
+
+        val relativePathIdx = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+        val relativePath: String? =
+            if (relativePathIdx >= 0) cursor.getString(relativePathIdx) else null
+
+        val dataPathIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+        val dataPath: String? = if (dataPathIdx >= 0) cursor.getString(dataPathIdx) else null
+
+        val sizeIdx = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+        val sizeBytes: Long? = if (sizeIdx >= 0) cursor.getLong(sizeIdx) else null
+
+        val widthIdx = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
+        val heightIdx = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
+        val width: Int? = if (widthIdx >= 0) cursor.getInt(widthIdx) else null
+        val height: Int? = if (heightIdx >= 0) cursor.getInt(heightIdx) else null
+
+        cursor.close()
+
+        dateTextView?.text = DateFormat.getDateInstance().format(date)
+        singleImageView?.let { Glide.with(it).load(imageUri).into(it) }
+
+        val location = when {
+            !relativePath.isNullOrBlank() && !displayName.isNullOrBlank() -> relativePath + displayName
+            !relativePath.isNullOrBlank() -> relativePath
+            !dataPath.isNullOrBlank() -> dataPath
+            else -> imageUri.toString()
+        }
+        val dimensions = if (width != null && height != null && width > 0 && height > 0) {
+            "${width}×${height}px"
+        } else {
+            "Unknown"
+        }
+        val sizeText = sizeBytes?.let { formatBytes(it) } ?: "Unknown"
+        infoTextView?.text = "Location: $location\nSize: $sizeText\nDimensions: $dimensions"
     }
 
     private fun formatBytes(bytes: Long): String {
