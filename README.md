@@ -1,4 +1,4 @@
-<H1>Thanks to https://github.com/slavabarkov for his great App Tidy<H1>
+<H1>Thanks to https://github.com/slavabarkov for hthe orignal Tidy</H1>
 
 <p>I needed the app to do a little bit more, with the help of AI i was able to add the folowing :</p>
 <ul>
