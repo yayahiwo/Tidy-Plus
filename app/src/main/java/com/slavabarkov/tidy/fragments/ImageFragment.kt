@@ -37,6 +37,7 @@ class ImageFragment : Fragment() {
     private var dateTextView: TextView? = null
     private var infoTextView: TextView? = null
     private var singleImageView: PhotoView? = null
+    private var xmpTextView: TextView? = null
     private var buttonExif: Button? = null
     private var exifGrid: GridLayout? = null
     private var showExif: Boolean = false
@@ -60,6 +61,7 @@ class ImageFragment : Fragment() {
         dateTextView = view.findViewById(R.id.dateTextView)
         infoTextView = view.findViewById(R.id.imageInfoTextView)
         singleImageView = view.findViewById(R.id.singeImageView)
+        xmpTextView = view.findViewById(R.id.xmpTextView)
         buttonExif = view.findViewById(R.id.buttonExif)
         exifGrid = view.findViewById(R.id.imageExifGrid)
         singleImageView?.apply {
@@ -198,6 +200,7 @@ class ImageFragment : Fragment() {
 
         dateTextView?.text = DateFormat.getDateInstance().format(date)
         singleImageView?.let { Glide.with(it).load(imageUri).into(it) }
+        updateXmpHeader(ctx, imageUri!!)
 
         val location = when {
             !relativePath.isNullOrBlank() && !displayName.isNullOrBlank() -> relativePath + displayName
@@ -214,6 +217,99 @@ class ImageFragment : Fragment() {
 
         basicInfoText = "Location: $location\nSize: $sizeText\nDimensions: $dimensions"
         updateInfoText()
+    }
+
+    private fun updateXmpHeader(ctx: android.content.Context, uri: Uri) {
+        val tv = xmpTextView ?: return
+        val summary = loadXmpSummary(ctx, uri)
+        if (summary.isNullOrBlank()) {
+            tv.text = ""
+            tv.visibility = View.GONE
+        } else {
+            tv.text = summary
+            tv.visibility = View.VISIBLE
+        }
+    }
+
+    private fun loadXmpSummary(ctx: android.content.Context, uri: Uri): String? {
+        return try {
+            val exif = ctx.contentResolver.openInputStream(uri)?.use { input ->
+                ExifInterface(input)
+            } ?: return null
+
+            val xmp = exif.getAttribute(ExifInterface.TAG_XMP)?.trim()?.takeIf { it.isNotEmpty() }
+                ?: return null
+
+            // Extract a few common XMP/IPTC fields (best-effort, string-based parsing).
+            fun extractFirstLi(tag: String): String? {
+                val start = xmp.indexOf("<$tag")
+                if (start < 0) return null
+                val end = xmp.indexOf("</$tag>", start)
+                if (end < 0) return null
+                val block = xmp.substring(start, end)
+                val liStart = block.indexOf("<rdf:li")
+                if (liStart < 0) return null
+                val liClose = block.indexOf('>', liStart)
+                if (liClose < 0) return null
+                val liEnd = block.indexOf("</rdf:li>", liClose)
+                if (liEnd < 0) return null
+                return decodeXml(block.substring(liClose + 1, liEnd).trim())
+            }
+
+            fun extractAllLi(tag: String, limit: Int = 3): List<String> {
+                val start = xmp.indexOf("<$tag")
+                if (start < 0) return emptyList()
+                val end = xmp.indexOf("</$tag>", start)
+                if (end < 0) return emptyList()
+                val block = xmp.substring(start, end)
+                val results = ArrayList<String>(limit)
+                var idx = 0
+                while (results.size < limit) {
+                    val liStart = block.indexOf("<rdf:li", idx)
+                    if (liStart < 0) break
+                    val liClose = block.indexOf('>', liStart)
+                    if (liClose < 0) break
+                    val liEnd = block.indexOf("</rdf:li>", liClose)
+                    if (liEnd < 0) break
+                    val value = decodeXml(block.substring(liClose + 1, liEnd).trim())
+                    if (value.isNotEmpty()) results.add(value)
+                    idx = liEnd + 9
+                }
+                return results
+            }
+
+            val title = extractFirstLi("dc:title")
+            val description = extractFirstLi("dc:description")
+            val creator = extractAllLi("dc:creator", limit = 1).firstOrNull()
+            val keywords = extractAllLi("dc:subject", limit = 3)
+
+            val lines = ArrayList<String>(3)
+            if (!title.isNullOrBlank()) lines.add(title)
+            if (!description.isNullOrBlank() && description != title) lines.add(description)
+            if (!creator.isNullOrBlank() && lines.size < 2) lines.add("By: $creator")
+
+            if (lines.isEmpty() && keywords.isNotEmpty()) {
+                lines.add("Keywords: " + keywords.joinToString(", "))
+            }
+
+            if (lines.isEmpty()) {
+                // Fallback: show that XMP exists without dumping the full packet.
+                "Metadata available"
+            } else {
+                lines.joinToString(" • ")
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun decodeXml(s: String): String {
+        return s
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
     }
 
     private fun updateInfoText() {
@@ -313,10 +409,18 @@ class ImageFragment : Fragment() {
             return
         }
 
+        val colCount =
+            if (ctx.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                3
+            } else {
+                2
+            }
+        grid.columnCount = colCount
+
         val infoColor = infoTextView?.currentTextColor
         val density = ctx.resources.displayMetrics.density
         val colGapPx = (6 * density).toInt()
-        val rowGapPx = (2 * density).toInt()
+        val rowGapPx = 1
 
         items.forEachIndexed { index, (label, value) ->
             val tv = TextView(ctx).apply {
@@ -326,16 +430,13 @@ class ImageFragment : Fragment() {
                 if (infoColor != null) setTextColor(infoColor)
             }
 
-            val col = index % 2
+            val col = index % colCount
             val lp = GridLayout.LayoutParams().apply {
                 width = 0
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                setMargins(
-                    if (col == 1) colGapPx else 0,
-                    rowGapPx,
-                    if (col == 0) colGapPx else 0,
-                    rowGapPx
-                )
+                val left = if (col == 0) 0 else colGapPx
+                val right = if (col == colCount - 1) 0 else colGapPx
+                setMargins(left, rowGapPx, right, rowGapPx)
             }
             grid.addView(tv, lp)
         }

@@ -21,18 +21,27 @@
             android:layout_weight="2"
             tools:ignore="NestedWeights" />
 
-        <TextView
-            android:id="@+id/dateTextView"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="8"
-            android:fontFamily="sans-serif-medium"
             android:gravity="center"
-            android:text="1 Jan, 2023"
-            android:textColor="?attr/colorOnSurface"
-            android:alpha="0.87"
-            android:textSize="20sp"
-            android:typeface="normal" />
+            android:orientation="vertical"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp">
+
+            <TextView
+                android:id="@+id/dateTextView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:text="1 Jan, 2023"
+                android:textColor="?attr/colorOnSurface"
+                android:alpha="0.87"
+                android:textSize="15sp"
+                android:typeface="normal" />
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="0dp"
@@ -71,6 +80,7 @@
         android:overScrollMode="ifContentScrolls"
         android:paddingLeft="12dp"
         android:paddingRight="12dp"
+        android:paddingTop="1px"
         android:scrollbars="vertical">
 
         <LinearLayout
@@ -92,8 +102,22 @@
                 android:id="@+id/imageExifGrid"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="1px"
                 android:columnCount="2"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/xmpTextView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1px"
+                android:ellipsize="end"
+                android:gravity="start|top"
+                android:maxLines="4"
+                android:text="Metadata: …"
+                android:textColor="?attr/colorOnSurface"
+                android:alpha="0.7"
+                android:textSize="12sp"
                 android:visibility="gone" />
         </LinearLayout>
     </ScrollView>
