@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
 import com.slavabarkov.tidy.dot
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.viewmodels.ORTTextViewModel
@@ -157,13 +158,15 @@ class SearchFragment : Fragment() {
 
         if (mSearchViewModel.pendingIndexRefresh) {
             reindexProgressContainer?.visibility = View.VISIBLE
-            recyclerView.isEnabled = false
             val p = mORTImageViewModel.progress.value ?: 0.0
             val progressPercent: Int = (p * 100).toInt()
             reindexProgressBar?.progress = progressPercent
-            reindexProgressText?.text = "Updating image index: ${progressPercent}%"
+            reindexProgressText?.text =
+                if (mSearchViewModel.indexPaused) "Indexing paused: ${progressPercent}%"
+                else "Updating image index: ${progressPercent}%"
             reindexCountText?.text = "Indexed photos: ${mORTImageViewModel.indexedCount.value ?: 0}"
         }
+        updateIndexingControls()
 
         val initialResults = mSearchViewModel.searchResults ?: mORTImageViewModel.idxList.reversed()
         mSearchViewModel.searchResults = initialResults
@@ -208,7 +211,9 @@ class SearchFragment : Fragment() {
             if (!mSearchViewModel.pendingIndexRefresh) return@observe
             val progressPercent: Int = (progress * 100).toInt()
             reindexProgressBar?.progress = progressPercent
-            reindexProgressText?.text = "Updating image index: ${progressPercent}%"
+            if (!mSearchViewModel.indexPaused) {
+                reindexProgressText?.text = "Updating image index: ${progressPercent}%"
+            }
             if (progress == 1.0) {
                 finishReindex()
             }
@@ -217,6 +222,17 @@ class SearchFragment : Fragment() {
         mORTImageViewModel.indexedCount.observe(viewLifecycleOwner) { count ->
             if (!mSearchViewModel.pendingIndexRefresh) return@observe
             reindexCountText?.text = "Indexed photos: $count"
+        }
+
+        mORTImageViewModel.isIndexing.observe(viewLifecycleOwner) { indexing ->
+            if (!mSearchViewModel.pendingIndexRefresh) return@observe
+            updateIndexingControls()
+            if (indexing) return@observe
+            if (mSearchViewModel.indexPaused) {
+                showPartialIndexResults()
+            } else if ((mORTImageViewModel.progress.value ?: 0.0) >= 1.0) {
+                finishReindex()
+            }
         }
 
         selectionActions = view.findViewById(R.id.selectionActions)
@@ -241,7 +257,16 @@ class SearchFragment : Fragment() {
         }
 
         sortBySimilarityButton?.setOnClickListener {
-            toggleSimilaritySort()
+            if (mSearchViewModel.lastSearchIsImageSearch) {
+                val firstVisible =
+                    (recyclerView.layoutManager as? GridLayoutManager)?.findFirstVisibleItemPosition()
+                        ?.coerceAtLeast(0) ?: 0
+                mSearchViewModel.showImageSearchDimensions = !mSearchViewModel.showImageSearchDimensions
+                setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+                recyclerView.scrollToPosition(firstVisible)
+            } else {
+                toggleSimilaritySort()
+            }
         }
 
         deleteSelectedButton?.setOnClickListener {
@@ -287,6 +312,14 @@ class SearchFragment : Fragment() {
 
         clearButton = view.findViewById(R.id.clearButton)
         clearButton?.setOnClickListener{
+            if (mSearchViewModel.pendingIndexRefresh) {
+                if (mSearchViewModel.indexPaused) {
+                    resumeReindex()
+                } else {
+                    pauseReindex()
+                }
+                return@setOnClickListener
+            }
             searchText?.text = null
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
@@ -296,6 +329,62 @@ class SearchFragment : Fragment() {
             setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
         }
         return view
+    }
+
+    private fun pauseReindex() {
+        mSearchViewModel.indexPaused = true
+        updateIndexingControls()
+        reindexProgressText?.text = "Stopping…"
+        val job = mORTImageViewModel.cancelIndexing()
+        lifecycleScope.launch {
+            try {
+                job?.join()
+            } catch (_: Exception) {
+            }
+            if (!isAdded) return@launch
+            if (mSearchViewModel.pendingIndexRefresh && mSearchViewModel.indexPaused) {
+                showPartialIndexResults()
+            }
+        }
+    }
+
+    private fun resumeReindex() {
+        mSearchViewModel.indexPaused = false
+        startReindex()
+    }
+
+    private fun updateIndexingControls() {
+        val button = clearButton as? MaterialButton ?: return
+        when {
+            mSearchViewModel.pendingIndexRefresh && mSearchViewModel.indexPaused -> {
+                button.setIconResource(R.drawable.ic_play)
+                button.contentDescription = "Resume indexing"
+            }
+            mSearchViewModel.pendingIndexRefresh -> {
+                button.setIconResource(R.drawable.ic_pause)
+                button.contentDescription = "Pause indexing"
+            }
+            else -> {
+                button.setIconResource(R.drawable.ic_clear)
+                button.contentDescription = "Clear"
+            }
+        }
+    }
+
+    private fun showPartialIndexResults() {
+        val recyclerView = recyclerView ?: return
+        val p = mORTImageViewModel.progress.value ?: 0.0
+        val progressPercent: Int = (p * 100).toInt()
+        reindexProgressContainer?.visibility = View.VISIBLE
+        reindexProgressBar?.progress = progressPercent
+        reindexProgressText?.text = "Indexing paused: ${progressPercent}%"
+        reindexCountText?.text = "Indexed photos: ${mORTImageViewModel.indexedCount.value ?: 0}"
+
+        mSearchViewModel.lastSearchIsImageSearch = false
+        mSearchViewModel.lastSearchEmbedding = null
+        mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
+        setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+        recyclerView.scrollToPosition(0)
     }
 
     private fun toggleSimilaritySort() {
@@ -514,8 +603,6 @@ class SearchFragment : Fragment() {
     }
 
     private fun startReindex() {
-        val recyclerView = recyclerView ?: return
-
         val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             android.Manifest.permission.READ_MEDIA_IMAGES
         } else {
@@ -532,21 +619,24 @@ class SearchFragment : Fragment() {
         }
 
         mSearchViewModel.pendingIndexRefresh = true
+        mSearchViewModel.indexPaused = false
+        updateIndexingControls()
         reindexProgressContainer?.visibility = View.VISIBLE
         reindexProgressBar?.progress = 0
         reindexProgressText?.text = "Updating image index: 0%"
         reindexCountText?.text = "Indexed photos: 0"
 
-        recyclerView.isEnabled = false
         mORTImageViewModel.generateIndex()
     }
 
     private fun finishReindex() {
         val recyclerView = recyclerView ?: return
 
+        if (!mSearchViewModel.pendingIndexRefresh) return
         mSearchViewModel.pendingIndexRefresh = false
+        mSearchViewModel.indexPaused = false
+        updateIndexingControls()
         reindexProgressContainer?.visibility = View.GONE
-        recyclerView.isEnabled = true
 
         mSearchViewModel.lastSearchIsImageSearch = false
         mSearchViewModel.lastSearchEmbedding = null
@@ -585,12 +675,14 @@ class SearchFragment : Fragment() {
         mSearchViewModel.selectedImageIds.retainAll(allowed)
         imageCountText?.text = results.size.toString()
 
-        val showDimensions = mSearchViewModel.lastSearchIsImageSearch
-        imageSimilaritySection?.visibility = if (showDimensions) View.VISIBLE else View.GONE
+        val isImageSearch = mSearchViewModel.lastSearchIsImageSearch
+        val showDimensions = isImageSearch && mSearchViewModel.showImageSearchDimensions
+        imageSimilaritySection?.visibility = if (isImageSearch) View.VISIBLE else View.GONE
         topButtonsRow?.let { row ->
-            val bottomPaddingPx = if (showDimensions) 0 else 30
+            val bottomPaddingPx = if (isImageSearch) 0 else 30
             row.setPadding(row.paddingLeft, row.paddingTop, row.paddingRight, bottomPaddingPx)
         }
+        updateSortInfoButton()
         imageAdapter = ImageAdapter(
             requireContext(),
             results,
@@ -604,6 +696,19 @@ class SearchFragment : Fragment() {
 
         if (showDimensions) {
             loadDimensionsIfNeeded(results)
+        }
+    }
+
+    private fun updateSortInfoButton() {
+        val button = sortBySimilarityButton as? MaterialButton ?: return
+        if (mSearchViewModel.lastSearchIsImageSearch) {
+            button.setIconResource(R.drawable.ic_info)
+            button.contentDescription =
+                if (mSearchViewModel.showImageSearchDimensions) "Hide dimensions"
+                else "Show dimensions"
+        } else {
+            button.setIconResource(R.drawable.ic_sort)
+            button.contentDescription = "Sort by similarity"
         }
     }
 

@@ -12,6 +12,7 @@ import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.MediaStore
 import androidx.lifecycle.*
 import com.slavabarkov.tidy.R
@@ -24,6 +25,7 @@ import com.slavabarkov.tidy.normalizeL2
 import com.slavabarkov.tidy.preProcess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +40,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     var indexedCount: MutableLiveData<Int> = MutableLiveData(0)
     var isIndexing: MutableLiveData<Boolean> = MutableLiveData(false)
     private var indexingJob: Job? = null
+    private var indexingRunId: Int = 0
 
     init {
         val imageEmbeddingDao = ImageEmbeddingDatabase.getDatabase(application).imageEmbeddingDao()
@@ -46,10 +49,31 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
     fun generateIndex() {
         indexingJob?.cancel()
+        indexingRunId += 1
+        val runId = indexingRunId
+
         indexingJob = viewModelScope.launch(Dispatchers.Default) {
-            isIndexing.postValue(true)
-            progress.postValue(0.0)
-            indexedCount.postValue(0)
+            fun isLatest(): Boolean = indexingRunId == runId
+            fun postIsIndexing(value: Boolean) {
+                if (isLatest()) isIndexing.postValue(value)
+            }
+            fun postProgress(value: Double) {
+                if (isLatest()) progress.postValue(value)
+            }
+            fun postIndexedCount(value: Int) {
+                if (isLatest()) indexedCount.postValue(value)
+            }
+
+            postIsIndexing(true)
+            postProgress(0.0)
+            postIndexedCount(0)
+
+            val pm = getApplication<Application>().getSystemService(PowerManager::class.java)
+            val localWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Tidy:Indexing").apply {
+                setReferenceCounted(false)
+                // Keep CPU running if the screen turns off during indexing (safety timeout).
+                acquire(2 * 60 * 60 * 1000L)
+            }
 
             val modelID = R.raw.visual_quant
             val resources = getApplication<Application>().resources
@@ -91,6 +115,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
             val totalImages = cursor?.count ?: 0
             val desiredIds: HashSet<Long> = hashSetOf()
+            var completedNormally = false
             try {
                 cursor?.use {
                     val idColumn: Int = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
@@ -99,7 +124,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                     val bucketColumn: Int =
                         it.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
                     while (it.moveToNext()) {
-                        if (!isActive) return@use
+                        if (!isActive || !isLatest()) return@use
 
                         val id: Long = it.getLong(idColumn)
                         val date: Long = it.getLong(dateColumn)
@@ -111,7 +136,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                         if (record != null) {
                             newIdxList.add(record.id)
                             newEmbeddingsList.add(record.embedding)
-                            indexedCount.postValue(newIdxList.size)
+                            postIndexedCount(newIdxList.size)
                         } else {
                             val imageUri: Uri = Uri.withAppendedPath(uri, id.toString())
                             val inputStream = contentResolver.openInputStream(imageUri)
@@ -142,26 +167,23 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                                         )
                                         newIdxList.add(id)
                                         newEmbeddingsList.add(rawOutput)
-                                        indexedCount.postValue(newIdxList.size)
+                                        postIndexedCount(newIdxList.size)
                                     }
                                 }
                             }
                         }
                         // Record created/loaded, update progress
                         if (totalImages > 0) {
-                            progress.postValue(it.position.toDouble() / totalImages.toDouble())
+                            postProgress(it.position.toDouble() / totalImages.toDouble())
                         }
                     }
                 }
 
-                if (isActive) {
-                    withContext(Dispatchers.Main) {
-                        idxList = newIdxList
-                        embeddingsList = newEmbeddingsList
-                    }
-                    progress.postValue(1.0)
+                if (isActive && isLatest()) {
+                    completedNormally = true
 
-                    viewModelScope.launch(Dispatchers.IO) {
+                    viewModelScope.launch(Dispatchers.IO) purge@{
+                        if (!isLatest()) return@purge
                         val existingIds = repository.getAllIds().toHashSet()
                         existingIds.removeAll(desiredIds)
                         if (existingIds.isNotEmpty()) repository.deleteByIds(existingIds.toList())
@@ -170,9 +192,34 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             } finally {
                 cursor?.close()
                 session.close()
-                isIndexing.postValue(false)
+                try {
+                    if (localWakeLock.isHeld) localWakeLock.release()
+                } catch (_: Exception) {
+                }
+
+                if (isLatest()) {
+                    // Commit partial results even if the job was cancelled (e.g. user tapped X).
+                    withContext(NonCancellable + Dispatchers.Main) {
+                        idxList = newIdxList
+                        embeddingsList = newEmbeddingsList
+                    }
+                    if (completedNormally) {
+                        withContext(NonCancellable) {
+                            postProgress(1.0)
+                        }
+                    }
+                    withContext(NonCancellable) {
+                        postIsIndexing(false)
+                    }
+                }
             }
         }
+    }
+
+    fun cancelIndexing(): Job? {
+        val job = indexingJob
+        job?.cancel()
+        return job
     }
 
     fun removeFromIndex(ids: List<Long>) {
