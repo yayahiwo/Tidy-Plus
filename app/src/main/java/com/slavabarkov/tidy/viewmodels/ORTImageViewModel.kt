@@ -6,6 +6,7 @@ package com.slavabarkov.tidy.viewmodels
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
 import android.app.Application
 import android.content.ContentValues
 import android.content.ContentUris
@@ -44,11 +45,13 @@ import java.util.*
 class ORTImageViewModel(application: Application) : AndroidViewModel(application) {
     private var ortEnv: OrtEnvironment = OrtEnvironment.getEnvironment()
     private var repository: ImageEmbeddingRepository
-    private val imageSession = run {
+    private val visualModelBytes: ByteArray = run {
         val resources = getApplication<Application>().resources
-        val model = resources.openRawResource(R.raw.visual_quant).readBytes()
-        ortEnv.createSession(model)
+        resources.openRawResource(R.raw.visual_quant).readBytes()
     }
+    private val cpuSession: OrtSession = ortEnv.createSession(visualModelBytes)
+    @Volatile private var qnnSession: OrtSession? = null
+    @Volatile private var qnnAttempted: Boolean = false
     var idxList: ArrayList<Long> = arrayListOf()
     var embeddingsList: ArrayList<FloatArray> = arrayListOf()
     var progress: MutableLiveData<Double> = MutableLiveData(0.0)
@@ -63,6 +66,16 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         private const val PERF_LOG_TAG = "TidyPerf"
         private const val PERF_LOG_EVERY_INDEXED = 1000
     }
+
+    private enum class VisualExecution {
+        CPU,
+        QNN,
+    }
+
+    private data class SessionSelection(
+        val effective: VisualExecution,
+        val note: String? = null,
+    )
 
     private class IndexPerf {
         var runId: Int = 0
@@ -95,7 +108,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
 
         fun nowNs(): Long = SystemClock.elapsedRealtimeNanos()
 
-        fun format(label: String, indexedCount: Int): String {
+        fun format(label: String, indexedCount: Int, session: SessionSelection): String {
             val end = endNs.takeIf { it != 0L } ?: nowNs()
             val wallNs = (if (startNs != 0L) end - startNs else 0L).coerceAtLeast(0L)
             val measuredNs = (
@@ -115,6 +128,8 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 append(label)
                 append(" runId=").append(runId)
                 append(" model=").append(android.os.Build.MODEL)
+                append(" ep=").append(session.effective.name)
+                if (!session.note.isNullOrBlank()) append(" epNote=").append(session.note)
                 append(" indexed=").append(indexedCount)
                 append(" embedded=").append(embedded)
                 append(" dbHits=").append(dbHits)
@@ -140,24 +155,25 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
-        fun log(label: String, indexedCount: Int) {
-            Log.i(PERF_LOG_TAG, format(label, indexedCount))
+        fun log(label: String, indexedCount: Int, session: SessionSelection) {
+            Log.i(PERF_LOG_TAG, format(label, indexedCount, session))
         }
     }
 
-    private fun buildPerfFilename(perf: IndexPerf, label: String): String {
+    private fun buildPerfFilename(perf: IndexPerf, label: String, session: SessionSelection): String {
         val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        return "tidy_index_perf_${android.os.Build.MODEL}_${label}_run${perf.runId}_$ts.txt"
+        return "tidy_index_perf_${android.os.Build.MODEL}_${session.effective.name}_${label}_run${perf.runId}_$ts.txt"
     }
 
     private suspend fun writePerfToDownloads(
         perf: IndexPerf,
         label: String,
+        session: SessionSelection,
         text: String,
     ): Uri? {
         val ctx = getApplication<Application>()
         val resolver = ctx.contentResolver
-        val filename = buildPerfFilename(perf, label)
+        val filename = buildPerfFilename(perf, label, session)
 
         return try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -247,6 +263,50 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    @Synchronized
+    private fun getOrCreateQnnSessionOrNull(): OrtSession? {
+        if (qnnAttempted) return qnnSession
+        qnnAttempted = true
+
+        // We intentionally use reflection so the app continues to work with the default
+        // onnxruntime-android artifact. If built with onnxruntime-android-qnn, SessionOptions
+        // exposes addQnn(Map<String,String>) and this will create a QNN session.
+        return try {
+            val opts = OrtSession.SessionOptions()
+            val addQnn = opts.javaClass.methods.firstOrNull { m ->
+                m.name == "addQnn" &&
+                    m.parameterTypes.size == 1 &&
+                    Map::class.java.isAssignableFrom(m.parameterTypes[0])
+            } ?: run {
+                opts.close()
+                null
+            }
+
+            if (addQnn == null) return null
+
+            val qnnOptions = HashMap<String, String>()
+            // Target Hexagon HTP backend when available.
+            qnnOptions["backend_type"] = "htp"
+            addQnn.invoke(opts, qnnOptions)
+
+            val session = ortEnv.createSession(visualModelBytes, opts)
+            opts.close()
+            qnnSession = session
+            Log.i(PERF_LOG_TAG, "QNN session created")
+            session
+        } catch (t: Throwable) {
+            Log.w(PERF_LOG_TAG, "QNN session unavailable; using CPU", t)
+            null
+        }
+    }
+
+    private fun selectSession(): Pair<OrtSession, SessionSelection> {
+        val qnn = getOrCreateQnnSessionOrNull()
+        if (qnn != null) return qnn to SessionSelection(effective = VisualExecution.QNN)
+        val note = if (qnnAttempted) "qnn_unavailable" else "qnn_not_attempted"
+        return cpuSession to SessionSelection(effective = VisualExecution.CPU, note = note)
+    }
+
     fun generateIndex() {
         indexingJob?.cancel()
         indexingRunId += 1
@@ -257,7 +317,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 this.runId = runId
                 this.startNs = nowNs()
             }
-            val session = imageSession
+            val (session, sessionSelection) = selectSession()
 
             fun isLatest(): Boolean = indexingRunId == runId
             fun postIsIndexing(value: Boolean) {
@@ -434,7 +494,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                             val indexed = newIdxList.size
                             if (indexed - perf.lastLoggedIndexed >= PERF_LOG_EVERY_INDEXED) {
                                 perf.lastLoggedIndexed = indexed
-                                perf.log(label = "progress", indexedCount = indexed)
+                                perf.log(label = "progress", indexedCount = indexed, session = sessionSelection)
                             }
                         }
 
@@ -496,12 +556,13 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
                 if (isLatest()) {
                     perf.endNs = perf.nowNs()
                     val label = if (completedNormally) "done" else "cancelled_or_partial"
-                    val summary = perf.format(label = label, indexedCount = newIdxList.size)
-                    perf.log(label = label, indexedCount = newIdxList.size)
+                    val summary = perf.format(label = label, indexedCount = newIdxList.size, session = sessionSelection)
+                    perf.log(label = label, indexedCount = newIdxList.size, session = sessionSelection)
                     withContext(NonCancellable + Dispatchers.IO) {
                         val reportUri = writePerfToDownloads(
                             perf,
                             label = label,
+                            session = sessionSelection,
                             text = summary + "\n"
                         )
                         if (reportUri != null) {
@@ -529,7 +590,11 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         try {
-            imageSession.close()
+            cpuSession.close()
+        } catch (_: Exception) {
+        }
+        try {
+            qnnSession?.close()
         } catch (_: Exception) {
         }
     }
