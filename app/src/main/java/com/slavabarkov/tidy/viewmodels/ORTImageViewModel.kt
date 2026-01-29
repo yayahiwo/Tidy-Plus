@@ -52,6 +52,7 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     private val cpuSession: OrtSession = ortEnv.createSession(visualModelBytes)
     @Volatile private var qnnSession: OrtSession? = null
     @Volatile private var qnnAttempted: Boolean = false
+    @Volatile private var qnnSupportedCached: Boolean? = null
     var idxList: ArrayList<Long> = arrayListOf()
     var embeddingsList: ArrayList<FloatArray> = arrayListOf()
     var progress: MutableLiveData<Double> = MutableLiveData(0.0)
@@ -263,6 +264,37 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun isQnnSupported(): Boolean {
+        qnnSupportedCached?.let { return it }
+        val supported = try {
+            val opts = OrtSession.SessionOptions()
+            try {
+                opts.javaClass.methods.any { m ->
+                    m.name == "addQnn" &&
+                        m.parameterTypes.size == 1 &&
+                        Map::class.java.isAssignableFrom(m.parameterTypes[0])
+                }
+            } finally {
+                try {
+                    opts.close()
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Throwable) {
+            false
+        }
+        qnnSupportedCached = supported
+        return supported
+    }
+
+    private fun isQnnEnabledByUser(): Boolean {
+        val prefs = getApplication<Application>().getSharedPreferences(
+            TidySettings.PREFS_NAME,
+            android.content.Context.MODE_PRIVATE
+        )
+        return prefs.getBoolean(TidySettings.KEY_INDEX_USE_QNN, false)
+    }
+
     @Synchronized
     private fun getOrCreateQnnSessionOrNull(): OrtSession? {
         if (qnnAttempted) return qnnSession
@@ -301,9 +333,13 @@ class ORTImageViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun selectSession(): Pair<OrtSession, SessionSelection> {
+        if (!isQnnEnabledByUser()) {
+            return cpuSession to SessionSelection(effective = VisualExecution.CPU, note = "qnn_disabled")
+        }
+
         val qnn = getOrCreateQnnSessionOrNull()
         if (qnn != null) return qnn to SessionSelection(effective = VisualExecution.QNN)
-        val note = if (qnnAttempted) "qnn_unavailable" else "qnn_not_attempted"
+        val note = if (isQnnSupported()) "qnn_init_failed" else "qnn_not_supported"
         return cpuSession to SessionSelection(effective = VisualExecution.CPU, note = note)
     }
 

@@ -14,6 +14,10 @@ object TidySettings {
     const val KEY_INDEXED_BUCKET_IDS = "indexed_bucket_ids"
     const val KEY_INDEX_FOLDERS_CONFIGURED = "index_folders_configured"
 
+    // If available in the build, use Qualcomm QNN EP (Hexagon/HTP) for visual embedding inference.
+    // Falls back to CPU if QNN isn't available or fails to initialize.
+    const val KEY_INDEX_USE_QNN = "index_use_qnn"
+
     const val KEY_GRID_SPAN_COUNT = "grid_span_count"
     const val DEFAULT_GRID_SPAN_COUNT = 3
 }

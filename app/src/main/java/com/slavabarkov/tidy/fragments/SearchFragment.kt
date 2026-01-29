@@ -19,6 +19,8 @@ import android.view.ViewGroup
 import android.view.ScaleGestureDetector
 import android.graphics.Rect
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
@@ -704,6 +706,23 @@ class SearchFragment : Fragment() {
                     }
                 }
 
+                val prefs = requireContext().getSharedPreferences(TidySettings.PREFS_NAME, Context.MODE_PRIVATE)
+                val qnnAvailable = mORTImageViewModel.isQnnSupported()
+                val useQnnCheckbox = CheckBox(requireContext()).apply {
+                    text = if (qnnAvailable) {
+                        "Use Qualcomm QNN (Hexagon) acceleration (experimental)"
+                    } else {
+                        "Use Qualcomm QNN (Hexagon) acceleration (not available)"
+                    }
+                    isEnabled = qnnAvailable
+                    isChecked = qnnAvailable && prefs.getBoolean(TidySettings.KEY_INDEX_USE_QNN, false)
+                }
+                val optionsView = LinearLayout(requireContext()).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(48, 16, 48, 0)
+                    addView(useQnnCheckbox)
+                }
+
                 AlertDialog.Builder(requireContext())
                     .setTitle("Folders to index")
                     .setMultiChoiceItems(items.toTypedArray(), checked) { _, which, isChecked ->
@@ -717,11 +736,16 @@ class SearchFragment : Fragment() {
                             if (isChecked) checked[0] = false
                         }
                     }
+                    .setView(optionsView)
                     .setPositiveButton("OK") { _, _ ->
                         val selected = buckets
                             .filterIndexed { idx, _ -> checked[idx + 1] }
                             .map { it.first.toString() }
                             .toSet()
+
+                        prefs.edit()
+                            .putBoolean(TidySettings.KEY_INDEX_USE_QNN, useQnnCheckbox.isChecked)
+                            .apply()
 
                         if (checked[0] || selected.isEmpty()) {
                             mSearchViewModel.setIndexedBucketIds(emptySet())
