@@ -18,6 +18,8 @@ import android.widget.Toast
 import androidx.fragment.app.FragmentTransaction
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.Priority
+import com.bumptech.glide.load.DecodeFormat
 import com.slavabarkov.tidy.fragments.ImageFragment
 import com.slavabarkov.tidy.MainActivity
 import com.slavabarkov.tidy.R
@@ -30,6 +32,7 @@ class ImageAdapter(
     private val onSelectionChanged: ((selectedCount: Int) -> Unit)? = null,
     private val showDimensions: Boolean = false,
     private val dimensionsById: Map<Long, String> = emptyMap(),
+    private val lowPriorityThumbnails: Boolean = false,
 ) :
     RecyclerView.Adapter<ImageAdapter.ImageViewHolder>() {
     private val uri: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -56,7 +59,20 @@ class ImageAdapter(
         val item = dataset[position]
         val imageUri = Uri.withAppendedPath(uri, item.toString())
 
-        Glide.with(context).load(imageUri).thumbnail().into(holder.imageView)
+        val request = Glide.with(context)
+            .load(imageUri)
+            .thumbnail(0.1f)
+            .dontAnimate()
+
+        if (lowPriorityThumbnails) {
+            request
+                .format(DecodeFormat.PREFER_RGB_565)
+                .priority(Priority.LOW)
+                .override(256)
+                .into(holder.imageView)
+        } else {
+            request.into(holder.imageView)
+        }
 
         if (showDimensions) {
             val dims = dimensionsById[item]

@@ -72,16 +72,20 @@ class ORTTextViewModel(application: Application) : AndroidViewModel(application)
         attentionMask.rewind()
         val attentionMaskTensor = OnnxTensor.createTensor(ortEnv, attentionMask, inputShape)
 
-        val inputMap: MutableMap<String, OnnxTensor> = HashMap()
-        inputMap["input_ids"] = inputIdsTensor
-        inputMap["attention_mask"] = attentionMaskTensor
+        inputIdsTensor.use { idsTensor ->
+            attentionMaskTensor.use { maskTensor ->
+                val inputMap: MutableMap<String, OnnxTensor> = HashMap()
+                inputMap["input_ids"] = idsTensor
+                inputMap["attention_mask"] = maskTensor
 
-        val output = session?.run(inputMap)
-        output.use {
-            @Suppress("UNCHECKED_CAST") var rawOutput =
-                ((output?.get(0)?.value) as Array<FloatArray>)[0]
-            rawOutput = normalizeL2(rawOutput)
-            return rawOutput
+                val output = session.run(inputMap)
+                output.use {
+                    @Suppress("UNCHECKED_CAST") val rawOutput =
+                        ((output[0].value) as Array<FloatArray>)[0]
+                    normalizeL2(rawOutput)
+                    return rawOutput
+                }
+            }
         }
     }
 

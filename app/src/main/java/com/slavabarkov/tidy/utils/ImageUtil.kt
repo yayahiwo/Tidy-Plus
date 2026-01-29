@@ -9,6 +9,8 @@
 package com.slavabarkov.tidy
 
 import android.graphics.*
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
 const val DIM_BATCH_SIZE = 1
@@ -16,30 +18,61 @@ const val DIM_PIXEL_SIZE = 3
 const val IMAGE_SIZE_X = 224
 const val IMAGE_SIZE_Y = 224
 
-fun preProcess(bitmap: Bitmap): FloatBuffer {
-    val imgData = FloatBuffer.allocate(
-        DIM_BATCH_SIZE * DIM_PIXEL_SIZE * IMAGE_SIZE_X * IMAGE_SIZE_Y
-    )
-    imgData.rewind()
+fun allocateModelInputBuffer(): FloatBuffer {
+    val bytes = DIM_BATCH_SIZE * DIM_PIXEL_SIZE * IMAGE_SIZE_X * IMAGE_SIZE_Y * 4
+    return ByteBuffer.allocateDirect(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+}
+
+internal fun preProcessPixelsInto(
+    bmpData: IntArray,
+    floats: FloatArray,
+    out: FloatBuffer,
+) {
     val stride = IMAGE_SIZE_X * IMAGE_SIZE_Y
-    val bmpData = IntArray(stride)
-    bitmap.getPixels(bmpData, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    for (i in 0 until IMAGE_SIZE_X) {
-        for (j in 0 until IMAGE_SIZE_Y) {
-            val idx = IMAGE_SIZE_Y * i + j
-            val pixelValue = bmpData[idx]
-            imgData.put(idx, (((pixelValue shr 16 and 0xFF) / 255f - 0.48145467f) / 0.26862955f))
-            imgData.put(
-                idx + stride, (((pixelValue shr 8 and 0xFF) / 255f - 0.4578275f) / 0.2613026f)
-            )
-            imgData.put(
-                idx + stride * 2, (((pixelValue and 0xFF) / 255f - 0.40821072f) / 0.2757771f)
-            )
-        }
+    require(bmpData.size >= stride) { "bmpData must be at least $stride" }
+    require(floats.size >= DIM_PIXEL_SIZE * stride) { "floats must be at least ${DIM_PIXEL_SIZE * stride}" }
+
+    val inv255 = 1.0f / 255.0f
+    val meanR = 0.48145467f
+    val meanG = 0.4578275f
+    val meanB = 0.40821072f
+    val invStdR = 1.0f / 0.26862955f
+    val invStdG = 1.0f / 0.2613026f
+    val invStdB = 1.0f / 0.2757771f
+
+    val stride2 = stride * 2
+    for (idx in 0 until stride) {
+        val pixelValue = bmpData[idx]
+        val r = ((pixelValue shr 16) and 0xFF) * inv255
+        val g = ((pixelValue shr 8) and 0xFF) * inv255
+        val b = (pixelValue and 0xFF) * inv255
+        floats[idx] = (r - meanR) * invStdR
+        floats[idx + stride] = (g - meanG) * invStdG
+        floats[idx + stride2] = (b - meanB) * invStdB
     }
 
-    imgData.rewind()
-    return imgData
+    out.rewind()
+    out.put(floats, 0, DIM_PIXEL_SIZE * stride)
+    out.rewind()
+}
+
+fun preProcessInto(
+    bitmap: Bitmap,
+    bmpData: IntArray,
+    floats: FloatArray,
+    out: FloatBuffer,
+) {
+    bitmap.getPixels(bmpData, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    preProcessPixelsInto(bmpData, floats, out)
+}
+
+fun preProcess(bitmap: Bitmap): FloatBuffer {
+    val stride = IMAGE_SIZE_X * IMAGE_SIZE_Y
+    val bmpData = IntArray(stride)
+    val floats = FloatArray(DIM_PIXEL_SIZE * stride)
+    val out = allocateModelInputBuffer()
+    preProcessInto(bitmap, bmpData, floats, out)
+    return out
 }
 
 fun centerCrop(bitmap: Bitmap, imageSize: Int): Bitmap {

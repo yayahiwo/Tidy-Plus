@@ -6,6 +6,7 @@ package com.slavabarkov.tidy.fragments
 
 import android.app.Activity
 import android.app.RecoverableSecurityException
+import android.content.Context
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.pm.PackageManager
@@ -22,7 +23,9 @@ import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -36,6 +39,7 @@ import com.slavabarkov.tidy.dot
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.viewmodels.ORTTextViewModel
 import com.slavabarkov.tidy.R
+import com.slavabarkov.tidy.TidySettings
 import com.slavabarkov.tidy.viewmodels.SearchViewModel
 import com.slavabarkov.tidy.adapters.ImageAdapter
 import kotlinx.coroutines.Dispatchers
@@ -79,10 +83,35 @@ class SearchFragment : Fragment() {
         MoveWrite,
     }
 
+    private enum class PendingPermissionAction {
+        Startup,
+        Reindex,
+    }
+
     private var pendingAction: PendingAction? = null
     private var pendingDeleteIds: List<Long> = emptyList()
     private var pendingMoveIds: List<Long> = emptyList()
     private var pendingMoveRelativePath: String? = null
+    private var pendingPermissionAction: PendingPermissionAction? = null
+
+    private val permissionsRequest: ActivityResultLauncher<String> = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        val action = pendingPermissionAction
+        pendingPermissionAction = null
+
+        if (!isGranted) {
+            Toast.makeText(context, "The app requires photo access!", Toast.LENGTH_SHORT)
+                .show()
+            return@registerForActivityResult
+        }
+
+        when (action) {
+            PendingPermissionAction.Startup -> runStartupFlow()
+            PendingPermissionAction.Reindex -> startReindexInternal()
+            null -> Unit
+        }
+    }
 
     private val intentSenderLauncher =
         registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -130,6 +159,19 @@ class SearchFragment : Fragment() {
             recyclerView?.let { setResults(it, results) }
             recyclerView?.scrollToPosition(0)
             mSearchViewModel.fromImg2ImgFlag = false
+            return
+        }
+
+        // If we navigated away (e.g., opened an image) during indexing, ensure we still show a
+        // non-empty grid when coming back.
+        if (mSearchViewModel.pendingIndexRefresh) {
+            loadDisplayImagesIfNeeded()
+        } else if ((mSearchViewModel.searchResults == null || mSearchViewModel.searchResults!!.isEmpty()) &&
+            mORTImageViewModel.idxList.isNotEmpty()
+        ) {
+            val results = mORTImageViewModel.idxList.reversed()
+            mSearchViewModel.searchResults = results
+            recyclerView?.let { setResults(it, results) }
         }
     }
 
@@ -328,7 +370,104 @@ class SearchFragment : Fragment() {
             mSearchViewModel.similaritySortBaseResults = null
             setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
         }
+
+        runStartupFlow()
         return view
+    }
+
+    private fun queryImageIdsForDisplay(ctx: Context): List<Long> {
+        val contentResolver = ctx.contentResolver
+        val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.BUCKET_ID,
+            MediaStore.Images.Media.BUCKET_DISPLAY_NAME
+        )
+
+        val bucketIds = mSearchViewModel.getIndexedBucketIds()
+        val selection: String?
+        val selectionArgs: Array<String>?
+        if (bucketIds.isEmpty()) {
+            selection = null
+            selectionArgs = null
+        } else {
+            val placeholders = bucketIds.joinToString(",") { "?" }
+            selection = "${MediaStore.Images.Media.BUCKET_ID} IN ($placeholders)"
+            selectionArgs = bucketIds.toTypedArray()
+        }
+
+        val ids = ArrayList<Long>()
+        contentResolver.query(uri, projection, selection, selectionArgs, "${MediaStore.Images.Media._ID} DESC")
+            ?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val bucketName = cursor.getString(bucketNameCol)
+                    if (bucketName == "Screenshots") continue
+                    ids.add(cursor.getLong(idCol))
+                }
+            }
+        return ids
+    }
+
+    private fun loadDisplayImagesIfNeeded() {
+        if (!isAdded) return
+        if (!hasReadPermission()) return
+        if (mSearchViewModel.searchResults != null && mSearchViewModel.searchResults!!.isNotEmpty()) return
+
+        val ctx = context ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val ids = queryImageIdsForDisplay(ctx)
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                val rv = recyclerView ?: return@withContext
+                // Only auto-populate when we don't have a search in progress.
+                if (mSearchViewModel.lastSearchEmbedding != null) return@withContext
+                mSearchViewModel.searchResults = ids
+                setResults(rv, ids)
+            }
+        }
+    }
+
+    private fun requiredPermission(): String {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+    }
+
+    private fun hasReadPermission(): Boolean {
+        val ctx = context ?: return false
+        return ContextCompat.checkSelfPermission(ctx, requiredPermission()) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun runStartupFlow() {
+        val ctx = context ?: return
+        if (!hasReadPermission()) {
+            pendingPermissionAction = PendingPermissionAction.Startup
+            permissionsRequest.launch(requiredPermission())
+            return
+        }
+
+        val prefs = ctx.getSharedPreferences(TidySettings.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val configured = prefs.getBoolean(TidySettings.KEY_INDEX_FOLDERS_CONFIGURED, false)
+        if (!configured) {
+            if (!mSearchViewModel.startupRequested) {
+                mSearchViewModel.startupRequested = true
+                showIndexFoldersDialog()
+            }
+            return
+        }
+
+        // If we have no in-memory index yet (cold start), kick off indexing immediately and show progress here.
+        if (!mSearchViewModel.pendingIndexRefresh && mORTImageViewModel.idxList.isEmpty()) {
+            startReindexInternal()
+        }
+
+        // Always ensure we have something to show in the grid (even if we've already run the
+        // startup prompt and the fragment/view got recreated).
+        loadDisplayImagesIfNeeded()
     }
 
     private fun pauseReindex() {
@@ -592,9 +731,17 @@ class SearchFragment : Fragment() {
 
                         mSearchViewModel.searchResults = null
                         mSearchViewModel.clearSelection()
+                        mSearchViewModel.lastSearchIsImageSearch = false
+                        mSearchViewModel.lastSearchEmbedding = null
+                        mSearchViewModel.similaritySortActive = false
+                        mSearchViewModel.similaritySortBaseResults = null
                         imageAdapter?.clearSelection()
                         updateSelectionUI()
+
+                        // Populate the grid immediately from MediaStore (cheap) so the user can browse
+                        // while embeddings are being computed.
                         startReindex()
+                        loadDisplayImagesIfNeeded()
                     }
                     .setNegativeButton("Cancel", null)
                     .show()
@@ -603,21 +750,15 @@ class SearchFragment : Fragment() {
     }
 
     private fun startReindex() {
-        val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            android.Manifest.permission.READ_MEDIA_IMAGES
-        } else {
-            android.Manifest.permission.READ_EXTERNAL_STORAGE
-        }
-        val granted =
-            ContextCompat.checkSelfPermission(requireContext(), permission) == PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            Toast.makeText(requireContext(), "Grant photo access to re-index", Toast.LENGTH_SHORT)
-                .show()
-            val args = Bundle().apply { putBoolean("auto_start", true) }
-            findNavController().navigate(R.id.action_searchFragment_to_indexFragment, args)
+        if (!hasReadPermission()) {
+            pendingPermissionAction = PendingPermissionAction.Reindex
+            permissionsRequest.launch(requiredPermission())
             return
         }
+        startReindexInternal()
+    }
 
+    private fun startReindexInternal() {
         mSearchViewModel.pendingIndexRefresh = true
         mSearchViewModel.indexPaused = false
         updateIndexingControls()
@@ -689,7 +830,8 @@ class SearchFragment : Fragment() {
             mSearchViewModel.selectedImageIds,
             onSelectionChanged = { updateSelectionUI() },
             showDimensions = showDimensions,
-            dimensionsById = mSearchViewModel.imageDimensionsById
+            dimensionsById = mSearchViewModel.imageDimensionsById,
+            lowPriorityThumbnails = mSearchViewModel.pendingIndexRefresh
         )
         recyclerView.adapter = imageAdapter
         updateSelectionUI()

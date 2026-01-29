@@ -5,20 +5,30 @@
 package com.slavabarkov.tidy.data
 
 import androidx.room.TypeConverter
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
-import java.lang.reflect.Type
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 object Converters {
     @TypeConverter
-    fun fromString(value: String?): FloatArray {
-        val listType: Type = object : TypeToken<FloatArray>(){}.type
-        return Gson().fromJson(value, listType)
+    fun fromByteArray(value: ByteArray?): FloatArray {
+        if (value == null || value.isEmpty()) return floatArrayOf()
+        if (value.size % 4 != 0) return floatArrayOf()
+
+        val floats = FloatArray(value.size / 4)
+        ByteBuffer.wrap(value)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .asFloatBuffer()
+            .get(floats)
+        return floats
     }
 
     @TypeConverter
-    fun fromFloatArray(array: FloatArray): String {
-        val gson = Gson()
-        return gson.toJson(array)
+    fun fromFloatArray(array: FloatArray): ByteArray {
+        if (array.isEmpty()) return ByteArray(0)
+        val buffer = ByteBuffer
+            .allocate(array.size * 4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+        buffer.asFloatBuffer().put(array)
+        return buffer.array()
     }
 }

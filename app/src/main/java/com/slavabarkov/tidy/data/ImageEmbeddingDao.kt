@@ -14,8 +14,14 @@ interface ImageEmbeddingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addImageEmbedding(imageEmbedding: ImageEmbedding)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun addImageEmbeddings(imageEmbeddings: List<ImageEmbedding>)
+
     @Query("SELECT * FROM image_embeddings WHERE id = :id LIMIT 1")
     suspend fun getRecord(id: Long): ImageEmbedding?
+
+    @Query("SELECT * FROM image_embeddings WHERE id IN (:ids)")
+    suspend fun getRecordsByIds(ids: List<Long>): List<ImageEmbedding>
 
     @Query("DELETE FROM image_embeddings WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
