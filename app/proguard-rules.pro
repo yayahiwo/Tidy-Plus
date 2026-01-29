@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ONNX Runtime is used for inference. Keep its public API to avoid issues with reflection and
+# provider initialization in optimized builds (especially QNN-enabled builds).
+-keep class ai.onnxruntime.** { *; }

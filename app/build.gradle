@@ -4,6 +4,30 @@ plugins {
     id 'kotlin-kapt'
 }
 
+def tidyKeystoreProps = new Properties()
+def tidyKeystorePropsFile = rootProject.file("keystore.properties")
+if (tidyKeystorePropsFile.exists()) {
+    tidyKeystorePropsFile.withInputStream { tidyKeystoreProps.load(it) }
+}
+
+// Android Studio "Generate Signed Bundle / APK" injects these Gradle properties at build time.
+def tidyInjectedStoreFile = project.findProperty("android.injected.signing.store.file")?.toString()?.trim()
+def tidyInjectedStorePassword = project.findProperty("android.injected.signing.store.password")?.toString()?.trim()
+def tidyInjectedKeyAlias = project.findProperty("android.injected.signing.key.alias")?.toString()?.trim()
+def tidyInjectedKeyPassword = project.findProperty("android.injected.signing.key.password")?.toString()?.trim()
+
+def tidyReleaseStoreFile =
+        (tidyInjectedStoreFile ?: System.getenv("TIDY_KEYSTORE_PATH") ?: tidyKeystoreProps.getProperty("storeFile"))?.trim()
+def tidyReleaseStorePassword =
+        (tidyInjectedStorePassword ?: System.getenv("TIDY_KEYSTORE_PASSWORD") ?: tidyKeystoreProps.getProperty("storePassword"))?.trim()
+def tidyReleaseKeyAlias =
+        (tidyInjectedKeyAlias ?: System.getenv("TIDY_KEY_ALIAS") ?: tidyKeystoreProps.getProperty("keyAlias"))?.trim()
+def tidyReleaseKeyPassword =
+        (tidyInjectedKeyPassword ?: System.getenv("TIDY_KEY_PASSWORD") ?: tidyKeystoreProps.getProperty("keyPassword"))?.trim()
+
+def tidyReleaseSigningConfigured =
+        tidyReleaseStoreFile && tidyReleaseStorePassword && tidyReleaseKeyAlias && tidyReleaseKeyPassword
+
 android {
     namespace 'com.slavabarkov.tidy'
     compileSdk 34
@@ -18,9 +42,25 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            if (tidyReleaseSigningConfigured) {
+                storeFile file(tidyReleaseStoreFile)
+                storePassword tidyReleaseStorePassword
+                keyAlias tidyReleaseKeyAlias
+                keyPassword tidyReleaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            minifyEnabled false
+            // Maximize release optimizations (R8 shrinking/obfuscation + resource shrinking).
+            minifyEnabled true
+            shrinkResources true
+            if (tidyReleaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -30,6 +70,27 @@ android {
     }
     kotlinOptions {
         jvmTarget = '17'
+    }
+}
+
+// Don't fail Android Studio sync/configuration just because release signing isn't set up.
+// Instead, fail only if a release APK/AAB is actually being built without signing credentials.
+gradle.taskGraph.whenReady { graph ->
+    def isReleaseBuild = graph.allTasks.any { task ->
+        task.project == project && task.name.toLowerCase().contains("release") && (
+                task.name.toLowerCase().contains("assemble") ||
+                        task.name.toLowerCase().contains("bundle") ||
+                        task.name.toLowerCase().contains("package") ||
+                        task.name.toLowerCase().contains("validateSigning")
+        )
+    }
+    if (isReleaseBuild && !tidyReleaseSigningConfigured) {
+        throw new GradleException(
+                "Release signing isn't configured.\n" +
+                        "Create ${tidyKeystorePropsFile} (recommended) with storeFile/storePassword/keyAlias/keyPassword, " +
+                        "or set env vars: TIDY_KEYSTORE_PATH, TIDY_KEYSTORE_PASSWORD, TIDY_KEY_ALIAS, TIDY_KEY_PASSWORD.\n" +
+                        "Android Studio's \"Generate Signed Bundle / APK\" should also work (it injects signing properties at build time)."
+        )
     }
 }
 
