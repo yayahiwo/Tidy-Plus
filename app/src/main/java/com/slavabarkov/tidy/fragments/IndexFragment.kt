@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -22,6 +23,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
 import com.slavabarkov.tidy.TidySettings
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
@@ -74,6 +76,27 @@ class IndexFragment : Fragment() {
         savedInstanceState: Bundle?,
     ): View? {
         val view = inflater.inflate(R.layout.fragment_index, container, false)
+
+        // App startup now happens on SearchFragment (folder selection + reindex progress UI).
+        // If we land here as the first screen (e.g., restored stale back stack), redirect and
+        // skip doing any work in this legacy fragment.
+        val navController = findNavController()
+        val shouldRedirect = navController.previousBackStackEntry == null
+        if (shouldRedirect) {
+            view.post {
+                if (!isAdded) return@post
+                try {
+                    val opts = NavOptions.Builder()
+                        .setPopUpTo(R.id.indexFragment, true)
+                        .build()
+                    navController.navigate(R.id.searchFragment, null, opts)
+                } catch (e: Exception) {
+                    Log.w("Tidy", "Failed to redirect IndexFragment -> SearchFragment", e)
+                }
+            }
+            return view
+        }
+
         progressBarView = view.findViewById(R.id.progressBar)
         progressBarTextView = view.findViewById(R.id.progressBarText)
         indexedCountTextView = view.findViewById(R.id.indexedCountText)

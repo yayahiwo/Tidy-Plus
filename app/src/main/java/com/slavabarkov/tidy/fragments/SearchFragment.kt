@@ -198,6 +198,13 @@ class SearchFragment : Fragment() {
         reindexCountText = view.findViewById(R.id.reindexCountText)
         imageCountText = view.findViewById(R.id.imageCountText)
 
+        // If indexing was started from elsewhere (e.g., older flow / restored back stack),
+        // ensure the main screen shows progress and can populate the grid during indexing.
+        if (!mSearchViewModel.pendingIndexRefresh && mORTImageViewModel.isIndexing.value == true) {
+            mSearchViewModel.pendingIndexRefresh = true
+            mSearchViewModel.indexPaused = false
+        }
+
         if (mSearchViewModel.pendingIndexRefresh) {
             reindexProgressContainer?.visibility = View.VISIBLE
             val p = mORTImageViewModel.progress.value ?: 0.0
