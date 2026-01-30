@@ -941,6 +941,11 @@ class SearchFragment : Fragment() {
             }
 
             val candidateSet = HashSet<Int>(128)
+            val edges = HashMap<Int, IntList>()
+            fun addEdge(a: Int, b: Int) {
+                edges.getOrPut(a) { IntList() }.add(b)
+                edges.getOrPut(b) { IntList() }.add(a)
+            }
             for (i in ids.indices) {
                 if (!isActive) return@launch
                 candidateSet.clear()
@@ -965,13 +970,83 @@ class SearchFragment : Fragment() {
                     if (fastDot(a, b) >= threshold) {
                         duplicateFlags[i] = true
                         duplicateFlags[j] = true
+                        addEdge(i, j)
                     }
                 }
             }
 
+            class IntStack(initialCapacity: Int = 32) {
+                private var arr = IntArray(initialCapacity)
+                private var size = 0
+                fun push(v: Int) {
+                    if (size == arr.size) arr = arr.copyOf(maxOf(32, arr.size * 2))
+                    arr[size++] = v
+                }
+                fun pop(): Int = arr[--size]
+                fun isEmpty(): Boolean = size == 0
+            }
+
+            fun orderComponentGreedy(component: List<Int>): List<Int> {
+                if (component.size <= 2) return component.sorted()
+                val remaining = component.toMutableList()
+                remaining.sort()
+                val ordered = ArrayList<Int>(component.size)
+                var current = remaining.removeAt(0)
+                ordered.add(current)
+                while (remaining.isNotEmpty()) {
+                    val a = embeddings[current]
+                    var bestIdx = 0
+                    var bestScore = -Float.MAX_VALUE
+                    for (k in remaining.indices) {
+                        val j = remaining[k]
+                        val score = fastDot(a, embeddings[j])
+                        if (score > bestScore) {
+                            bestScore = score
+                            bestIdx = k
+                        }
+                    }
+                    current = remaining.removeAt(bestIdx)
+                    ordered.add(current)
+                }
+                return ordered
+            }
+
+            val visited = BooleanArray(ids.size)
+            val components = ArrayList<ArrayList<Int>>()
+            for (i in ids.indices) {
+                if (!duplicateFlags[i] || visited[i]) continue
+                val comp = ArrayList<Int>()
+                val stack = IntStack()
+                visited[i] = true
+                stack.push(i)
+                while (!stack.isEmpty()) {
+                    val cur = stack.pop()
+                    comp.add(cur)
+                    val neigh = edges[cur] ?: continue
+                    val arr = neigh.arr
+                    val sz = neigh.size
+                    for (k in 0 until sz) {
+                        val n = arr[k]
+                        if (n < 0 || n >= ids.size) continue
+                        if (!duplicateFlags[n] || visited[n]) continue
+                        visited[n] = true
+                        stack.push(n)
+                    }
+                }
+                components.add(comp)
+            }
+
+            components.sortWith(
+                compareByDescending<ArrayList<Int>> { it.size }
+                    .thenBy { it.minOrNull() ?: Int.MAX_VALUE }
+            )
+
             val dupIds = ArrayList<Long>()
-            for (i in ids.size - 1 downTo 0) {
-                if (duplicateFlags[i]) dupIds.add(ids[i])
+            for (comp in components) {
+                val orderedIdxs = orderComponentGreedy(comp)
+                for (idx in orderedIdxs) {
+                    dupIds.add(ids[idx])
+                }
             }
 
             withContext(Dispatchers.Main) {
@@ -996,7 +1071,11 @@ class SearchFragment : Fragment() {
                 val rv = recyclerView ?: return@withContext
                 setResults(rv, dupIds)
                 rv.scrollToPosition(0)
-                Toast.makeText(requireContext(), "Found ${dupIds.size} near-duplicates", Toast.LENGTH_SHORT)
+                Toast.makeText(
+                    requireContext(),
+                    "Found ${dupIds.size} near-duplicates in ${components.size} group(s)",
+                    Toast.LENGTH_SHORT
+                )
                     .show()
             }
         }
