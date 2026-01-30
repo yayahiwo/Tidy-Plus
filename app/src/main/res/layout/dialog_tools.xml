@@ -40,6 +40,21 @@
         android:layout_height="10dp" />
 
     <Button
+        android:id="@+id/toolsTagsButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Tags"
+        app:icon="@drawable/ic_tag"
+        app:iconTint="?attr/colorOnSurface"
+        app:iconPadding="12dp"
+        app:iconSize="22dp" />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="10dp" />
+
+    <Button
         android:id="@+id/toolsStatsButton"
         style="@style/Widget.MaterialComponents.Button.OutlinedButton"
         android:layout_width="match_parent"

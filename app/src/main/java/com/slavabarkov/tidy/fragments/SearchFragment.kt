@@ -38,6 +38,7 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.exifinterface.media.ExifInterface
 import com.google.android.material.button.MaterialButton
 import com.slavabarkov.tidy.dot
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
@@ -96,6 +97,7 @@ class SearchFragment : Fragment() {
         Startup,
         Reindex,
         ToolsStats,
+        ToolsTags,
     }
 
     private var pendingAction: PendingAction? = null
@@ -120,6 +122,7 @@ class SearchFragment : Fragment() {
             PendingPermissionAction.Startup -> runStartupFlow()
             PendingPermissionAction.Reindex -> startReindexInternal()
             PendingPermissionAction.ToolsStats -> showStatsDialogInternal()
+            PendingPermissionAction.ToolsTags -> showTagsDialogInternal()
             null -> Unit
         }
     }
@@ -863,13 +866,16 @@ class SearchFragment : Fragment() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_tools, null)
         val foldersButton = dialogView.findViewById<Button>(R.id.toolsFoldersButton)
         val duplicatesButton = dialogView.findViewById<Button>(R.id.toolsDuplicatesButton)
+        val tagsButton = dialogView.findViewById<Button>(R.id.toolsTagsButton)
         val statsButton = dialogView.findViewById<Button>(R.id.toolsStatsButton)
 
         val indexing = (mORTImageViewModel.isIndexing.value == true)
         duplicatesButton.isEnabled = !indexing
+        tagsButton.isEnabled = !indexing
         statsButton.isEnabled = !indexing
         if (indexing) {
             duplicatesButton.text = "Find near-duplicates (finish indexing first)"
+            tagsButton.text = "Tags (finish indexing first)"
             statsButton.text = "Stats (finish indexing first)"
         }
 
@@ -887,12 +893,216 @@ class SearchFragment : Fragment() {
             dialog.dismiss()
             startFindNearDuplicates(threshold = 0.99f)
         }
+        tagsButton.setOnClickListener {
+            dialog.dismiss()
+            showTagsDialog()
+        }
         statsButton.setOnClickListener {
             dialog.dismiss()
             showStatsDialog()
         }
 
         dialog.show()
+    }
+
+    private fun decodeXml(s: String): String {
+        return s
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+    }
+
+    private fun extractXmpTagKeywords(xmp: String): List<String> {
+        val start = xmp.indexOf("<dc:subject")
+        if (start < 0) return emptyList()
+        val end = xmp.indexOf("</dc:subject>", start)
+        if (end < 0) return emptyList()
+        val block = xmp.substring(start, end)
+
+        val results = ArrayList<String>(8)
+        var idx = 0
+        while (true) {
+            val liStart = block.indexOf("<rdf:li", idx)
+            if (liStart < 0) break
+            val liClose = block.indexOf('>', liStart)
+            if (liClose < 0) break
+            val liEnd = block.indexOf("</rdf:li>", liClose)
+            if (liEnd < 0) break
+            val value = decodeXml(block.substring(liClose + 1, liEnd).trim())
+            if (value.isNotEmpty()) results.add(value)
+            idx = liEnd + 9
+        }
+        return results
+    }
+
+    private fun showTagsDialog() {
+        if (!hasReadPermission()) {
+            pendingPermissionAction = PendingPermissionAction.ToolsTags
+            permissionsRequest.launch(requiredPermission())
+            return
+        }
+        showTagsDialogInternal()
+    }
+
+    private fun showTagsDialogInternal() {
+        if (mORTImageViewModel.isIndexing.value == true) {
+            Toast.makeText(requireContext(), "Wait for indexing to finish first", Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+
+        val statusText = TextView(requireContext()).apply {
+            setPadding(48, 24, 48, 0)
+            text = "Preparing…"
+        }
+        val progressBar = ProgressBar(requireContext(), null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            progress = 0
+        }
+        val progressWrap = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 16)
+            addView(statusText)
+            addView(progressBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+
+        var job: Job? = null
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle("Tags")
+            .setView(progressWrap)
+            .setNegativeButton("Cancel") { _, _ -> job?.cancel() }
+            .setCancelable(false)
+            .create()
+        dialog.show()
+
+        val appCtx = requireContext().applicationContext
+        job = lifecycleScope.launch(Dispatchers.IO) {
+            val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            )
+
+            val bucketIds = mSearchViewModel.getIndexedBucketIds()
+            val selection: String?
+            val selectionArgs: Array<String>?
+            val scopeLabel: String
+            if (bucketIds.isEmpty()) {
+                selection = null
+                selectionArgs = null
+                scopeLabel = "All folders"
+            } else {
+                val placeholders = bucketIds.joinToString(",") { "?" }
+                selection = "${MediaStore.Images.Media.BUCKET_ID} IN ($placeholders)"
+                selectionArgs = bucketIds.toTypedArray()
+                scopeLabel = "${bucketIds.size} folder(s)"
+            }
+
+            val ids = ArrayList<Long>(4096)
+            appCtx.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    if (!isActive) return@launch
+                    val bucketName = cursor.getString(bucketNameCol)
+                    if (bucketName == "Screenshots") continue
+                    ids.add(cursor.getLong(idCol))
+                }
+            }
+
+            val counts = HashMap<String, Long>(1024)
+            val casing = HashMap<String, String>(1024)
+            var processed = 0
+            var taggedImages = 0
+
+            for (id in ids) {
+                if (!isActive) return@launch
+                processed++
+
+                val imageUri = ContentUris.withAppendedId(uri, id)
+                val xmp = try {
+                    appCtx.contentResolver.openInputStream(imageUri)?.use { input ->
+                        val exif = ExifInterface(input)
+                        exif.getAttribute(ExifInterface.TAG_XMP)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+
+                if (!xmp.isNullOrBlank()) {
+                    val kws = extractXmpTagKeywords(xmp)
+                    if (kws.isNotEmpty()) {
+                        taggedImages++
+                        val unique = HashSet<String>(kws.size)
+                        for (kw in kws) {
+                            val trimmed = kw.trim()
+                            if (trimmed.isEmpty()) continue
+                            val norm = trimmed.lowercase(Locale.US)
+                            if (!unique.add(norm)) continue
+                            casing.putIfAbsent(norm, trimmed)
+                            counts[norm] = (counts[norm] ?: 0L) + 1L
+                        }
+                    }
+                }
+
+                if (processed % 100 == 0 || processed == ids.size) {
+                    val frac = if (ids.isEmpty()) 0.0 else processed.toDouble() / ids.size.toDouble()
+                    withContext(Dispatchers.Main) {
+                        if (!isAdded) return@withContext
+                        statusText.text = "Scanning tags… $processed / ${ids.size} ($scopeLabel)"
+                        progressBar.progress = (frac * progressBar.max).toInt().coerceIn(0, progressBar.max)
+                    }
+                }
+            }
+
+            val sorted = counts.entries
+                .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenBy { it.key })
+
+            val maxToShow = 2000
+            val shown = sorted.take(maxToShow)
+            val lines = shown.joinToString("\n") { (norm, c) ->
+                "${casing[norm] ?: norm}: $c"
+            }
+            val header = buildString {
+                appendLine("Scope: $scopeLabel (excluding Screenshots)")
+                appendLine("Images scanned: ${ids.size}")
+                appendLine("Images with tags: $taggedImages")
+                appendLine("Unique tags: ${counts.size}")
+                if (sorted.size > maxToShow) appendLine("Showing top $maxToShow tags:")
+                else appendLine("Tags:")
+            }
+            val reportText = header + "\n" + lines
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                try {
+                    dialog.dismiss()
+                } catch (_: Exception) {
+                }
+
+                val reportView = TextView(requireContext()).apply {
+                    setPadding(48, 32, 48, 16)
+                    setTextIsSelectable(true)
+                    text = reportText
+                }
+                val scroll = android.widget.ScrollView(requireContext()).apply { addView(reportView) }
+                AlertDialog.Builder(requireContext())
+                    .setTitle("Tags")
+                    .setView(scroll)
+                    .setPositiveButton("Copy") { _, _ ->
+                        val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("Tidy tags", reportText))
+                        Toast.makeText(requireContext(), "Copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }
     }
 
     private data class StatsReport(
