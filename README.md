@@ -3,16 +3,16 @@
 <p>I needed the app to do a little bit more than the original Tidy to help me organize and clean my big photo collection, And with the help of AI I was able to add the following functionality:</p>
 
 <ul>
-<li> Added image-to-image similarity threshold control (persisted) and applied it to “Find Similar” results filtering.</li>
+<li> Added image-to-image similarity threshold control slider.</li>
 <li> Added multi-select in the grid (long-press to enter selection mode + checkboxes/overlay).</li>
 <li> Added bulk Delete for selected photos using Android’s system permission flow (MediaStore delete requests/recoverable permission).</li>
 <li> Added bulk Move for selected photos using folder picker + write permission (updates RELATIVE_PATH; primary storage support).</li>
 <li> Added automatic index cleanup when photos are deleted (removes them from the Room CLIP index + in- memory lists).</li>
-<li> Added a persistent “folders to index” setting (by MediaStore buckets) and updated indexing to only index selected folders.</li>
+<li> Added a persistent “folders to index” setting.</li>
 <li> Changed startup so the app doesn’t auto-index immediately; it waits for folder selection and a Start action (with auto-prompt on first run).</li>
-<li> Added indexing progress + indexed count display on the indexing screen.</li>
+<li> Added indexing progress + indexed count display.</li>
 <li> Added re-index progress UI directly in the search screen after folder changes, and auto-refreshes the grid when indexing finishes.</li>
-<li> Added pinch-to-zoom for the thumbnails grid by changing column count (now supports much smaller thumbnails; up to 24 columns).</li>
+<li> Added pinch-to-zoom for the thumbnails grid</li>
 <li> Made the grid remember its zoom level (persists the current column count across navigation).</li>
 <li> Fixed grid visuals: square thumbnails (no stretching) and uniform 2px spacing horizontally/vertically.</li>
 <li> In image-to-image results, added dimensions under each thumbnail (e.g., 800x600) and only show them for those results.</li>
