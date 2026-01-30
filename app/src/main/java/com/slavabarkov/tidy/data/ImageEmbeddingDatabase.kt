@@ -94,5 +94,17 @@ abstract class ImageEmbeddingDatabase : RoomDatabase() {
                 return instance
             }
         }
+
+        fun closeDatabase() {
+            synchronized(this) {
+                val db = INSTANCE ?: return
+                try {
+                    db.close()
+                } catch (_: Exception) {
+                } finally {
+                    INSTANCE = null
+                }
+            }
+        }
     }
 }

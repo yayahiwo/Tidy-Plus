@@ -82,6 +82,7 @@ class SearchFragment : Fragment() {
     private var reindexProgressBar: ProgressBar? = null
     private var reindexCountText: TextView? = null
     private var findDuplicatesJob: Job? = null
+    private var pendingDbBackupText: String? = null
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -155,6 +156,20 @@ class SearchFragment : Fragment() {
                 return@registerForActivityResult
             }
             performMove(pendingMoveIds, relativePath)
+        }
+
+    private val backupDbLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+            if (uri == null) return@registerForActivityResult
+            val expectedText = pendingDbBackupText ?: return@registerForActivityResult
+            pendingDbBackupText = null
+            backupDatabaseTo(uri, expectedText)
+        }
+
+    private val restoreDbLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            restoreDatabaseFrom(uri)
         }
 
     override fun onResume() {
@@ -1054,7 +1069,7 @@ class SearchFragment : Fragment() {
         val appCtx = requireContext().applicationContext
         lifecycleScope.launch(Dispatchers.IO) {
             val report = runCatching { computeStatsReport(appCtx) }.getOrNull()
-            val text = if (report == null) "Failed to compute stats." else formatStatsReport(report)
+            val reportText = if (report == null) "Failed to compute stats." else formatStatsReport(report)
 
             withContext(Dispatchers.Main) {
                 if (!isAdded) return@withContext
@@ -1066,20 +1081,211 @@ class SearchFragment : Fragment() {
                 val textView = TextView(requireContext()).apply {
                     setPadding(48, 32, 48, 16)
                     setTextIsSelectable(true)
-                    this.text = text
+                    this.text = reportText
                 }
                 val scroll = android.widget.ScrollView(requireContext()).apply {
                     addView(textView)
                 }
+
+                val actionsRow = LinearLayout(requireContext()).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(48, 0, 48, 24)
+                }
+                val backupButton = Button(requireContext()).apply {
+                    this.text = "Backup DB"
+                    setOnClickListener { startBackupDatabase(reportText) }
+                }
+                val restoreButton = Button(requireContext()).apply {
+                    this.text = "Restore DB"
+                    setOnClickListener { confirmAndStartRestoreDatabase() }
+                }
+                actionsRow.addView(
+                    backupButton,
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = 16
+                    }
+                )
+                actionsRow.addView(
+                    restoreButton,
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                )
+
+                val container = LinearLayout(requireContext()).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(
+                        scroll,
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            0,
+                            1f
+                        )
+                    )
+                    addView(
+                        actionsRow,
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                }
                 AlertDialog.Builder(requireContext())
                     .setTitle("Stats")
-                    .setView(scroll)
+                    .setView(container)
                     .setPositiveButton("Copy") { _, _ ->
                         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("Tidy stats", text))
+                        cm.setPrimaryClip(ClipData.newPlainText("Tidy stats", reportText))
                         Toast.makeText(requireContext(), "Copied", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Close", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun startBackupDatabase(statsText: String) {
+        if (mORTImageViewModel.isIndexing.value == true) {
+            Toast.makeText(requireContext(), "Wait for indexing to finish first", Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+        pendingDbBackupText = statsText
+        val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+        val filename = "tidy_image_embedding_database_$ts.sqlite"
+        backupDbLauncher.launch(filename)
+    }
+
+    private fun backupDatabaseTo(uri: android.net.Uri, statsText: String) {
+        val progress = ProgressBar(requireContext()).apply {
+            isIndeterminate = true
+            setPadding(48, 32, 48, 32)
+        }
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle("Backup database")
+            .setMessage("Writing backup…")
+            .setView(progress)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+
+        val appCtx = requireContext().applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val db = ImageEmbeddingDatabase.getDatabase(appCtx)
+                // Ensure any WAL changes are flushed into the main db file for a single-file backup.
+                runCatching {
+                    db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").close()
+                }
+
+                val dbFile = appCtx.getDatabasePath("image_embedding_database")
+                val totalBytes = dbFile.length().coerceAtLeast(0L)
+                appCtx.contentResolver.openOutputStream(uri, "w")?.use { os ->
+                    java.io.FileInputStream(dbFile).use { input ->
+                        input.copyTo(os)
+                    }
+                } ?: error("Failed to open output")
+                totalBytes
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                try {
+                    dialog.dismiss()
+                } catch (_: Exception) {
+                }
+                if (result.isFailure) {
+                    Toast.makeText(requireContext(), "Backup failed", Toast.LENGTH_SHORT).show()
+                    return@withContext
+                }
+                val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Tidy stats", statsText))
+                Toast.makeText(
+                    requireContext(),
+                    "Backup saved (${formatBytes(result.getOrThrow())}). Stats copied.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun confirmAndStartRestoreDatabase() {
+        if (mORTImageViewModel.isIndexing.value == true) {
+            Toast.makeText(requireContext(), "Wait for indexing to finish first", Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("Restore database")
+            .setMessage("This will replace the current index database on this device. Continue?")
+            .setPositiveButton("Choose file") { _, _ ->
+                restoreDbLauncher.launch(arrayOf("*/*"))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun restoreDatabaseFrom(uri: android.net.Uri) {
+        val progress = ProgressBar(requireContext()).apply {
+            isIndeterminate = true
+            setPadding(48, 32, 48, 32)
+        }
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle("Restore database")
+            .setMessage("Restoring…")
+            .setView(progress)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+
+        val appCtx = requireContext().applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                // Close Room before replacing files.
+                ImageEmbeddingDatabase.closeDatabase()
+
+                val dbFile = appCtx.getDatabasePath("image_embedding_database")
+                val walFile = java.io.File(dbFile.parentFile, dbFile.name + "-wal")
+                val shmFile = java.io.File(dbFile.parentFile, dbFile.name + "-shm")
+
+                appCtx.contentResolver.openInputStream(uri)?.use { input ->
+                    java.io.FileOutputStream(dbFile, false).use { out ->
+                        input.copyTo(out)
+                        out.flush()
+                    }
+                } ?: error("Failed to open input")
+
+                // Drop WAL/SHM so SQLite rebuilds a clean state.
+                runCatching { walFile.delete() }
+                runCatching { shmFile.delete() }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                try {
+                    dialog.dismiss()
+                } catch (_: Exception) {
+                }
+                if (result.isFailure) {
+                    Toast.makeText(requireContext(), "Restore failed", Toast.LENGTH_SHORT).show()
+                    return@withContext
+                }
+
+                AlertDialog.Builder(requireContext())
+                    .setTitle("Restore complete")
+                    .setMessage("Database restored. Restart the app to use the restored index.")
+                    .setPositiveButton("Restart now") { _, _ ->
+                        val pm = requireContext().packageManager
+                        val intent = pm.getLaunchIntentForPackage(requireContext().packageName)
+                        if (intent != null) {
+                            intent.addFlags(
+                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            )
+                            startActivity(intent)
+                        }
+                        requireActivity().finishAffinity()
+                        Runtime.getRuntime().exit(0)
+                    }
+                    .setNegativeButton("Later", null)
                     .show()
             }
         }
