@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/tidy_dialog_h_padding"
+    android:paddingEnd="@dimen/tidy_dialog_h_padding"
+    android:paddingTop="16dp"
+    android:paddingBottom="8dp">
+
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/settingsShowTextSimilaritySliderSwitch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Show text-search similarity slider" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="When enabled, a threshold slider appears above the grid for text searches."
+        android:textColor="?attr/colorOnSurface"
+        android:textSize="13sp" />
+
+</LinearLayout>

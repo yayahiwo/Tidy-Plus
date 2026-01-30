@@ -26,6 +26,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     val imageDimensionsById: LinkedHashMap<Long, String> = linkedMapOf()
     var similaritySortActive: Boolean = false
     var similaritySortBaseResults: List<Long>? = null
+    val textSearchTokens: MutableList<String> = mutableListOf()
+    val textSearchEmbeddingByToken: LinkedHashMap<String, FloatArray> = linkedMapOf()
 
     // Metadata Tags cache (derived from image XMP dc:subject). This is kept in-memory only to avoid
     // re-scanning all images on every open/click.
@@ -44,6 +46,16 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             TidySettings.KEY_IMAGE_SIMILARITY_THRESHOLD,
             TidySettings.DEFAULT_IMAGE_SIMILARITY_THRESHOLD
         )
+    private var showTextSimilaritySlider: Boolean =
+        prefs.getBoolean(
+            TidySettings.KEY_SHOW_TEXT_SIMILARITY_SLIDER,
+            TidySettings.DEFAULT_SHOW_TEXT_SIMILARITY_SLIDER
+        )
+    private var textSimilarityThreshold: Float =
+        prefs.getFloat(
+            TidySettings.KEY_TEXT_SIMILARITY_THRESHOLD,
+            TidySettings.DEFAULT_TEXT_SIMILARITY_THRESHOLD
+        )
     private var indexedBucketIds: Set<String> =
         prefs.getStringSet(TidySettings.KEY_INDEXED_BUCKET_IDS, emptySet())?.toSet() ?: emptySet()
     private var gridSpanCount: Int =
@@ -55,6 +67,21 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         val clamped = value.coerceIn(0f, 1f)
         imageSimilarityThreshold = clamped
         prefs.edit().putFloat(TidySettings.KEY_IMAGE_SIMILARITY_THRESHOLD, clamped).apply()
+    }
+
+    fun getShowTextSimilaritySlider(): Boolean = showTextSimilaritySlider
+
+    fun setShowTextSimilaritySlider(value: Boolean) {
+        showTextSimilaritySlider = value
+        prefs.edit().putBoolean(TidySettings.KEY_SHOW_TEXT_SIMILARITY_SLIDER, value).apply()
+    }
+
+    fun getTextSimilarityThreshold(): Float = textSimilarityThreshold
+
+    fun setTextSimilarityThreshold(value: Float) {
+        val clamped = value.coerceIn(0f, 1f)
+        textSimilarityThreshold = clamped
+        prefs.edit().putFloat(TidySettings.KEY_TEXT_SIMILARITY_THRESHOLD, clamped).apply()
     }
 
     fun getIndexedBucketIds(): Set<String> = indexedBucketIds
@@ -101,6 +128,11 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearSelection() {
         selectedImageIds.clear()
+    }
+
+    fun clearTextSearchTokens() {
+        textSearchTokens.clear()
+        textSearchEmbeddingByToken.clear()
     }
 
     fun clearMetadataTagsCache() {

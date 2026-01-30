@@ -4,19 +4,18 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingLeft="24dp"
-    android:paddingRight="24dp"
+    android:paddingStart="@dimen/tidy_dialog_h_padding"
+    android:paddingEnd="@dimen/tidy_dialog_h_padding"
     android:paddingTop="16dp"
     android:paddingBottom="8dp">
 
     <Button
         android:id="@+id/toolsFoldersButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        style="@style/Widget.Tidy.ToolsDialogButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Folders to index"
         app:icon="@drawable/ic_folder"
-        app:iconTint="?attr/colorOnSurface"
         app:iconPadding="12dp"
         app:iconSize="22dp" />
 
@@ -26,24 +25,22 @@
 
     <Button
         android:id="@+id/toolsDuplicatesButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        style="@style/Widget.Tidy.ToolsDialogButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Find near-duplicates (≥ 0.99)"
         app:icon="@drawable/ic_stacked_files"
-        app:iconTint="?attr/colorOnSurface"
         app:iconPadding="12dp"
         app:iconSize="22dp" />
 
     <Button
         android:id="@+id/toolsSortButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        style="@style/Widget.Tidy.ToolsDialogButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="@dimen/tidy_space_xs"
         android:text="Sort by similarity"
         app:icon="@drawable/ic_sort"
-        app:iconTint="?attr/colorOnSurface"
         app:iconPadding="12dp"
         app:iconSize="22dp" />
 
@@ -53,12 +50,11 @@
 
     <Button
         android:id="@+id/toolsTagsButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        style="@style/Widget.Tidy.ToolsDialogButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Metadata Tags"
         app:icon="@drawable/ic_tag"
-        app:iconTint="?attr/colorOnSurface"
         app:iconPadding="12dp"
         app:iconSize="22dp" />
 
@@ -68,12 +64,25 @@
 
     <Button
         android:id="@+id/toolsStatsButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        style="@style/Widget.Tidy.ToolsDialogButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Stats"
         app:icon="@drawable/ic_stats"
-        app:iconTint="?attr/colorOnSurface"
+        app:iconPadding="12dp"
+        app:iconSize="22dp" />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="10dp" />
+
+    <Button
+        android:id="@+id/toolsSettingsButton"
+        style="@style/Widget.Tidy.ToolsDialogButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Settings"
+        app:icon="@drawable/ic_settings"
         app:iconPadding="12dp"
         app:iconSize="22dp" />
 

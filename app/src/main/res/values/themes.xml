@@ -11,6 +11,17 @@
         <item name="colorOnSecondary">@color/black</item>
         <!-- Status bar color. -->
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.TIDY.MaterialAlertDialog</item>
         <!-- Customize your theme here. -->
+    </style>
+
+    <!-- Experimental Material 3 theme (opt-in via setting; default remains Theme.TIDY). -->
+    <style name="Theme.TIDY.M3" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:statusBarColor">?attr/colorPrimary</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.TIDY.MaterialAlertDialog</item>
     </style>
 </resources>

@@ -94,13 +94,8 @@ class ImageFragment : Fragment() {
 
         val buttonBackToAllImages: Button = view.findViewById(R.id.buttonBackToAllImages)
         buttonBackToAllImages.setOnClickListener {
-            mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
-            mSearchViewModel.lastSearchIsImageSearch = false
-            mSearchViewModel.showBackToAllImages = false
-            mSearchViewModel.lastResultsAreNearDuplicates = false
-            mSearchViewModel.lastSearchEmbedding = null
-            mSearchViewModel.clearSelection()
-            mSearchViewModel.fromImg2ImgFlag = true
+            // Keep the current search/results state (text search, near-duplicates, image-to-image, etc.)
+            // and simply go back to the grid.
             parentFragmentManager.popBackStack()
         }
 

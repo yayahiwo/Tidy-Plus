@@ -23,6 +23,7 @@ import android.graphics.Rect
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.AutoCompleteTextView
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.SeekBar
@@ -39,12 +40,17 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.exifinterface.media.ExifInterface
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.textfield.TextInputLayout
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.slavabarkov.tidy.dot
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.viewmodels.ORTTextViewModel
@@ -61,19 +67,27 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.sqrt
 import kotlin.math.roundToInt
-
+import android.content.res.ColorStateList
+import android.graphics.Color
+ 
 
 class SearchFragment : Fragment() {
     private var searchText: AutoCompleteTextView? = null
-    private var clearButton: Button? = null
+    private var searchBackButton: ImageButton? = null
+    private var searchSubmitButton: ImageButton? = null
+    private var searchChips: ChipGroup? = null
+    private var searchInputScroll: android.widget.HorizontalScrollView? = null
+    private var clearButton: ImageButton? = null
     private var topButtonsRow: View? = null
     private var resultsTitleText: TextView? = null
     private var resultsCountText: TextView? = null
     private var imageSimilaritySection: View? = null
+    private var imageSimilarityLabel: TextView? = null
     private var imageSimilaritySeekBar: SeekBar? = null
     private var imageSimilarityValue: TextView? = null
-    private var toolsButton: Button? = null
+    private var toolsButton: View? = null
     private var selectionActions: View? = null
     private var selectedCountText: TextView? = null
     private var moveSelectedButton: Button? = null
@@ -91,10 +105,16 @@ class SearchFragment : Fragment() {
     private var pendingDbBackupText: String? = null
     private var autocompleteAdapter: VocabPrefixAdapter? = null
     private var suppressAutocomplete: Boolean = false
-    private var searchTextLayout: TextInputLayout? = null
+    private var suppressSimilaritySeekBarUpdates: Boolean = false
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
+
+    private enum class SimilarityUiMode {
+        NONE,
+        IMAGE,
+        TEXT,
+    }
 
     private enum class PendingAction {
         Delete,
@@ -186,6 +206,9 @@ class SearchFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         searchText = view?.findViewById(R.id.searchText)
+        searchChips = view?.findViewById(R.id.searchChips)
+        searchInputScroll = view?.findViewById(R.id.searchInputScroll)
+        refreshSearchChips()
         val recyclerView = view?.findViewById<RecyclerView>(R.id.recycler_view)
 
         if (mSearchViewModel.fromImg2ImgFlag) {
@@ -230,6 +253,7 @@ class SearchFragment : Fragment() {
         resultsCountText = view.findViewById(R.id.resultsCountText)
         topButtonsRow = view.findViewById(R.id.topButtonsRow)
         imageSimilaritySection = view.findViewById(R.id.imageSimilaritySection)
+        imageSimilarityLabel = view.findViewById(R.id.imageSimilarityLabel)
         reindexProgressContainer = view.findViewById(R.id.reindexProgressContainer)
         reindexProgressText = view.findViewById(R.id.reindexProgressText)
         reindexProgressBar = view.findViewById(R.id.reindexProgressBar)
@@ -261,33 +285,47 @@ class SearchFragment : Fragment() {
 
         mORTTextViewModel.init()
 
-        searchTextLayout = view.findViewById(R.id.searchTextLayout)
         searchText = view.findViewById(R.id.searchText)
+        searchBackButton = view.findViewById(R.id.searchBackButton)
+        searchSubmitButton = view.findViewById(R.id.searchSubmitButton)
+        searchChips = view.findViewById(R.id.searchChips)
+        searchInputScroll = view.findViewById(R.id.searchInputScroll)
+        refreshSearchChips()
         setupSearchAutocomplete()
 
         imageSimilaritySeekBar = view.findViewById(R.id.imageSimilaritySeekBar)
         imageSimilarityValue = view.findViewById(R.id.imageSimilarityValue)
-        val initialThreshold = mSearchViewModel.getImageSimilarityThreshold()
-        imageSimilaritySeekBar?.progress = (initialThreshold * 100).roundToInt()
-        imageSimilarityValue?.text = String.format(Locale.US, "%.2f", initialThreshold)
+        applySimilaritySectionState()
         imageSimilaritySeekBar?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (suppressSimilaritySeekBarUpdates) return
                 val threshold = progress / 100f
-                mSearchViewModel.setImageSimilarityThreshold(threshold)
                 imageSimilarityValue?.text = String.format(Locale.US, "%.2f", threshold)
 
-                val embedding = mSearchViewModel.lastSearchEmbedding ?: return
-                if (!mSearchViewModel.lastSearchIsImageSearch) return
+                when (currentSimilarityUiMode()) {
+                    SimilarityUiMode.IMAGE -> {
+                        mSearchViewModel.setImageSimilarityThreshold(threshold)
+                        val embedding = mSearchViewModel.lastSearchEmbedding ?: return
+                        if (!mSearchViewModel.lastSearchIsImageSearch) return
 
-                mSearchViewModel.sortByCosineDistance(
-                    embedding,
-                    mORTImageViewModel.embeddingsList,
-                    mORTImageViewModel.idxList,
-                    minSimilarity = threshold,
-                    isImageSearch = true
-                )
-                setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
-                recyclerView.scrollToPosition(0)
+                        mSearchViewModel.sortByCosineDistance(
+                            embedding,
+                            mORTImageViewModel.embeddingsList,
+                            mORTImageViewModel.idxList,
+                            minSimilarity = threshold,
+                            isImageSearch = true
+                        )
+                        setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+                        recyclerView.scrollToPosition(0)
+                    }
+                    SimilarityUiMode.TEXT -> {
+                        mSearchViewModel.setTextSimilarityThreshold(threshold)
+                        if (mSearchViewModel.lastSearchIsImageSearch) return
+                        if (mSearchViewModel.lastResultsAreNearDuplicates) return
+                        runCompoundTextSearch()
+                    }
+                    SimilarityUiMode.NONE -> Unit
+                }
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
@@ -356,7 +394,7 @@ class SearchFragment : Fragment() {
         toolsButton = view.findViewById(R.id.indexFoldersButton)
         toolsButton?.setOnClickListener { showToolsDialog() }
 
-        searchTextLayout?.setEndIconOnClickListener { runTextSearch() }
+        searchSubmitButton?.setOnClickListener { runTokenOrSearch() }
 
         clearButton = view.findViewById(R.id.clearButton)
         clearButton?.setOnClickListener{
@@ -376,18 +414,240 @@ class SearchFragment : Fragment() {
     private fun runTextSearch() {
         val rv = recyclerView ?: return
         searchText?.dismissDropDown()
-        val textEmbedding: FloatArray =
-            mORTTextViewModel.getTextEmbedding(searchText?.text?.toString().orEmpty())
+        val query = searchText?.text?.toString().orEmpty().trim()
+        if (query.isBlank()) return
+        val textEmbedding: FloatArray = mORTTextViewModel.getTextEmbedding(query)
+        val minSimilarity =
+            if (mSearchViewModel.getShowTextSimilaritySlider()) mSearchViewModel.getTextSimilarityThreshold() else null
         mSearchViewModel.sortByCosineDistance(
             textEmbedding,
             mORTImageViewModel.embeddingsList,
             mORTImageViewModel.idxList,
+            minSimilarity = minSimilarity,
             isImageSearch = false
         )
         mSearchViewModel.lastResultsAreNearDuplicates = false
         mSearchViewModel.showBackToAllImages = false
         setResults(rv, mSearchViewModel.searchResults ?: emptyList())
         rv.scrollToPosition(0)
+    }
+
+    private fun runTokenOrSearch() {
+        searchText?.dismissDropDown()
+        val raw = searchText?.text?.toString().orEmpty()
+        val term = raw.trim()
+        if (term.isNotBlank()) {
+            val added = addSearchToken(term)
+            clearSearchInput()
+            if (added) {
+                refreshSearchChips()
+            }
+            runCompoundTextSearch()
+            return
+        }
+
+        if (mSearchViewModel.textSearchTokens.isNotEmpty()) {
+            runCompoundTextSearch()
+        }
+    }
+
+    private fun clearSearchInput() {
+        val searchTextView = searchText ?: return
+        suppressAutocomplete = true
+        searchTextView.setText("", false)
+        searchTextView.requestFocus()
+        suppressAutocomplete = false
+        searchTextView.dismissDropDown()
+        searchInputScroll?.post { searchInputScroll?.fullScroll(View.FOCUS_RIGHT) }
+    }
+
+    private fun addSearchToken(term: String): Boolean {
+        val normalized = term.trim()
+        if (normalized.isBlank()) return false
+        val exists =
+            mSearchViewModel.textSearchTokens.any { it.equals(normalized, ignoreCase = true) }
+        if (exists) return false
+        mSearchViewModel.textSearchTokens.add(normalized)
+        return true
+    }
+
+    private fun removeSearchToken(term: String) {
+        val idx =
+            mSearchViewModel.textSearchTokens.indexOfFirst { it.equals(term, ignoreCase = true) }
+        if (idx == -1) return
+        val removed = mSearchViewModel.textSearchTokens.removeAt(idx)
+        mSearchViewModel.textSearchEmbeddingByToken.remove(removed)
+    }
+
+    private fun refreshSearchChips() {
+        val group = searchChips ?: return
+        val scroll = searchInputScroll
+        group.removeAllViews()
+        val tokens = mSearchViewModel.textSearchTokens
+        val visible = tokens.isNotEmpty()
+        group.visibility = if (visible) View.VISIBLE else View.GONE
+
+        for (token in tokens) {
+            val chip = Chip(requireContext()).apply {
+                text = token
+                isCloseIconVisible = true
+                isClickable = false
+                isCheckable = false
+                styleSearchChip(this)
+                setOnCloseIconClickListener {
+                    removeSearchToken(token)
+                    refreshSearchChips()
+                    runCompoundTextSearch()
+                }
+            }
+            group.addView(chip)
+        }
+        // Keep the caret right after the last chip by scrolling to the end.
+        scroll?.post { scroll.fullScroll(View.FOCUS_RIGHT) }
+        refreshSearchStartIcon()
+    }
+
+    private fun styleSearchChip(chip: Chip) {
+        val fg = MaterialColors.getColor(chip, com.google.android.material.R.attr.colorOnSurface)
+        val bg = ColorUtils.setAlphaComponent(Color.WHITE, 128) // 50% translucent
+        chip.chipBackgroundColor = ColorStateList.valueOf(bg)
+        chip.setTextColor(fg)
+        chip.closeIconTint = ColorStateList.valueOf(fg)
+        chip.chipStrokeWidth = 0f
+        chip.chipStrokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+        chip.elevation = 0f
+        // Force fully-rounded pill.
+        val cornerPx = chip.resources.displayMetrics.density * 999f
+        chip.shapeAppearanceModel =
+            chip.shapeAppearanceModel.toBuilder().setAllCornerSizes(cornerPx).build()
+        chip.setEnsureMinTouchTargetSize(false)
+    }
+
+    private fun runCompoundTextSearch() {
+        val rv = recyclerView ?: return
+        val tokens = mSearchViewModel.textSearchTokens.toList()
+        if (tokens.isEmpty()) {
+            clearSearchAndResetResults()
+            return
+        }
+
+        val threshold = if (mSearchViewModel.getShowTextSimilaritySlider()) {
+            mSearchViewModel.getTextSimilarityThreshold()
+        } else {
+            TidySettings.DEFAULT_TEXT_SIMILARITY_THRESHOLD
+        }
+        val minSimilarity: Float? =
+            if (tokens.size >= 2 || mSearchViewModel.getShowTextSimilaritySlider()) threshold else null
+
+        val tokenEmbeddings = ArrayList<FloatArray>(tokens.size)
+        for (token in tokens) {
+            val existing = mSearchViewModel.textSearchEmbeddingByToken[token]
+            if (existing != null) {
+                tokenEmbeddings.add(existing)
+                continue
+            }
+            val emb = mORTTextViewModel.getTextEmbedding(token)
+            mSearchViewModel.textSearchEmbeddingByToken[token] = emb
+            tokenEmbeddings.add(emb)
+        }
+
+        val idToIndex = HashMap<Long, Int>(mORTImageViewModel.idxList.size * 2)
+        for (i in mORTImageViewModel.idxList.indices) {
+            idToIndex[mORTImageViewModel.idxList[i]] = i
+        }
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            var candidates: List<Long> = mORTImageViewModel.idxList
+            val scoreSumById = HashMap<Long, Float>(candidates.size)
+
+            for (termEmb in tokenEmbeddings) {
+                val nextCandidates = ArrayList<Long>(candidates.size)
+                for (id in candidates) {
+                    val idx = idToIndex[id] ?: continue
+                    val score = termEmb.dot(mORTImageViewModel.embeddingsList[idx])
+                    if (minSimilarity == null || score >= minSimilarity) {
+                        nextCandidates.add(id)
+                        scoreSumById[id] = (scoreSumById[id] ?: 0f) + score
+                    }
+                }
+                candidates = nextCandidates
+                if (candidates.isEmpty()) break
+            }
+
+            val denom = tokenEmbeddings.size.coerceAtLeast(1).toFloat()
+            val results = candidates.sortedByDescending { (scoreSumById[it] ?: 0f) / denom }
+            val combined = averageEmbeddings(tokenEmbeddings)
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                mSearchViewModel.searchResults = results
+                mSearchViewModel.lastSearchIsImageSearch = false
+                mSearchViewModel.lastResultsAreNearDuplicates = false
+                mSearchViewModel.showBackToAllImages = false
+                mSearchViewModel.lastSearchEmbedding = combined
+                setResults(rv, results)
+                rv.scrollToPosition(0)
+            }
+        }
+    }
+
+    private fun averageEmbeddings(embeddings: List<FloatArray>): FloatArray? {
+        if (embeddings.isEmpty()) return null
+        val dim = embeddings[0].size
+        val sum = FloatArray(dim)
+        for (emb in embeddings) {
+            if (emb.size != dim) return null
+            for (i in 0 until dim) sum[i] += emb[i]
+        }
+        for (i in 0 until dim) sum[i] /= embeddings.size.toFloat()
+
+        var norm = 0f
+        for (v in sum) norm += v * v
+        norm = sqrt(norm)
+        if (norm > 0f) {
+            for (i in 0 until dim) sum[i] /= norm
+        }
+        return sum
+    }
+
+    private fun currentSimilarityUiMode(): SimilarityUiMode {
+        if (mSearchViewModel.lastSearchIsImageSearch) return SimilarityUiMode.IMAGE
+        if (mSearchViewModel.lastResultsAreNearDuplicates) return SimilarityUiMode.NONE
+        return if (mSearchViewModel.getShowTextSimilaritySlider()) SimilarityUiMode.TEXT else SimilarityUiMode.NONE
+    }
+
+    private fun applySimilaritySectionState() {
+        val section = imageSimilaritySection ?: return
+        val label = imageSimilarityLabel
+        val seekBar = imageSimilaritySeekBar
+        val valueText = imageSimilarityValue
+
+        val mode = currentSimilarityUiMode()
+        val visible = mode != SimilarityUiMode.NONE
+        section.visibility = if (visible) View.VISIBLE else View.GONE
+
+        val threshold = when (mode) {
+            SimilarityUiMode.IMAGE -> mSearchViewModel.getImageSimilarityThreshold()
+            SimilarityUiMode.TEXT -> mSearchViewModel.getTextSimilarityThreshold()
+            SimilarityUiMode.NONE -> mSearchViewModel.getTextSimilarityThreshold()
+        }
+        label?.text = when (mode) {
+            SimilarityUiMode.IMAGE -> "Image search similarity threshold"
+            SimilarityUiMode.TEXT -> "Text search similarity threshold"
+            SimilarityUiMode.NONE -> "Text search similarity threshold"
+        }
+
+        if (seekBar != null && valueText != null) {
+            suppressSimilaritySeekBarUpdates = true
+            seekBar.progress = (threshold * 100).roundToInt()
+            valueText.text = String.format(Locale.US, "%.2f", threshold)
+            suppressSimilaritySeekBarUpdates = false
+        }
+
+        topButtonsRow?.let { row ->
+            val bottomPaddingPx = if (visible) 0 else 30
+            row.setPadding(row.paddingLeft, row.paddingTop, row.paddingRight, bottomPaddingPx)
+        }
     }
 
     private fun setupSearchAutocomplete() {
@@ -416,7 +676,7 @@ class SearchFragment : Fragment() {
 
         searchTextView.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                runTextSearch()
+                runTokenOrSearch()
                 true
             } else {
                 false
@@ -425,21 +685,13 @@ class SearchFragment : Fragment() {
 
         searchTextView.setOnItemClickListener { _, _, position, _ ->
             val suggestion = autocompleteAdapter?.getItem(position) ?: return@setOnItemClickListener
-            val fullText = searchTextView.text?.toString() ?: ""
-            val cursor = getCursorPosition(searchTextView, fullText)
-            val before = fullText.substring(0, cursor)
-            val after = fullText.substring(cursor, fullText.length)
-            val lastSpaceIdx = before.lastIndexOf(' ')
-            val prefixStart = if (lastSpaceIdx == -1) 0 else lastSpaceIdx + 1
-            val keepSpace = after.isEmpty() || after.startsWith(" ")
-            val newBefore = before.substring(0, prefixStart) + suggestion + if (keepSpace) " " else ""
-
-            suppressAutocomplete = true
-            searchTextView.setText(newBefore + after.trimStart(), false)
-            searchTextView.setSelection(newBefore.length)
-            suppressAutocomplete = false
             searchTextView.dismissDropDown()
-            runTextSearch()
+            val added = addSearchToken(suggestion)
+            clearSearchInput()
+            if (added) {
+                refreshSearchChips()
+            }
+            runCompoundTextSearch()
         }
 
         searchTextView.addTextChangedListener(object : TextWatcher {
@@ -479,28 +731,25 @@ class SearchFragment : Fragment() {
     }
 
     private fun refreshSearchStartIcon() {
-        val layout = searchTextLayout ?: return
+        val backButton = searchBackButton ?: return
         val searchTextView = searchText ?: return
         val text = searchTextView.text?.toString().orEmpty()
         val shouldShowBack =
             text.isNotBlank() ||
+                mSearchViewModel.textSearchTokens.isNotEmpty() ||
                 mSearchViewModel.lastResultsAreNearDuplicates ||
                 mSearchViewModel.lastSearchIsImageSearch ||
                 mSearchViewModel.similaritySortActive ||
                 mSearchViewModel.showBackToAllImages
 
         if (!shouldShowBack) {
-            layout.setStartIconDrawable(null)
-            layout.setStartIconOnClickListener(null)
+            backButton.visibility = View.GONE
+            backButton.setOnClickListener(null)
             return
         }
 
-        layout.setStartIconDrawable(R.drawable.ic_arrow_back)
-        layout.setStartIconContentDescription("Back")
-        layout.isStartIconCheckable = false
-        layout.setStartIconOnClickListener {
-            clearSearchAndResetResults()
-        }
+        backButton.visibility = View.VISIBLE
+        backButton.setOnClickListener { clearSearchAndResetResults() }
     }
 
     private fun clearSearchAndResetResults() {
@@ -512,6 +761,8 @@ class SearchFragment : Fragment() {
             suppressAutocomplete = false
             searchTextView.dismissDropDown()
         }
+        mSearchViewModel.clearTextSearchTokens()
+        refreshSearchChips()
 
         mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
         mSearchViewModel.lastSearchIsImageSearch = false
@@ -649,16 +900,16 @@ class SearchFragment : Fragment() {
     }
 
     private fun updateIndexingControls() {
-        val button = clearButton as? MaterialButton ?: return
+        val button = clearButton ?: return
         when {
             mSearchViewModel.pendingIndexRefresh && mSearchViewModel.indexPaused -> {
                 button.visibility = View.VISIBLE
-                button.setIconResource(R.drawable.ic_play)
+                button.setImageResource(R.drawable.ic_play)
                 button.contentDescription = "Resume indexing"
             }
             mSearchViewModel.pendingIndexRefresh -> {
                 button.visibility = View.VISIBLE
-                button.setIconResource(R.drawable.ic_pause)
+                button.setImageResource(R.drawable.ic_pause)
                 button.contentDescription = "Pause indexing"
             }
             else -> {
@@ -680,9 +931,29 @@ class SearchFragment : Fragment() {
         mSearchViewModel.showBackToAllImages = false
         mSearchViewModel.lastResultsAreNearDuplicates = false
         mSearchViewModel.lastSearchEmbedding = null
-        mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
-        setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
-        recyclerView.scrollToPosition(0)
+        mSearchViewModel.similaritySortActive = false
+        mSearchViewModel.similaritySortBaseResults = null
+
+        // Keep whatever was already being displayed (usually the MediaStore list), so pausing
+        // doesn't blank the grid. If we have nothing yet, fall back to the MediaStore query.
+        val existing = mSearchViewModel.searchResults
+        if (existing != null && existing.isNotEmpty()) {
+            setResults(recyclerView, existing)
+            recyclerView.scrollToPosition(0)
+            return
+        }
+
+        val ctx = context ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val ids = queryImageIdsForDisplay(ctx)
+            val results = if (ids.isNotEmpty()) ids else mORTImageViewModel.idxList.reversed()
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                mSearchViewModel.searchResults = results
+                setResults(recyclerView, results)
+                recyclerView.scrollToPosition(0)
+            }
+        }
     }
 
     private fun toggleSimilaritySort() {
@@ -873,7 +1144,7 @@ class SearchFragment : Fragment() {
                     addView(useQnnCheckbox)
                 }
 
-                AlertDialog.Builder(requireContext())
+                MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Folders to index")
                     .setMultiChoiceItems(items.toTypedArray(), checked) { _, which, isChecked ->
                         if (which == 0) {
@@ -979,6 +1250,7 @@ class SearchFragment : Fragment() {
         val sortButton = dialogView.findViewById<Button>(R.id.toolsSortButton)
         val tagsButton = dialogView.findViewById<Button>(R.id.toolsTagsButton)
         val statsButton = dialogView.findViewById<Button>(R.id.toolsStatsButton)
+        val settingsButton = dialogView.findViewById<Button>(R.id.toolsSettingsButton)
 
         val indexing = (mORTImageViewModel.isIndexing.value == true)
         duplicatesButton.isEnabled = !indexing
@@ -998,7 +1270,7 @@ class SearchFragment : Fragment() {
             (sortButton as? MaterialButton)?.setIconResource(iconRes)
         }
 
-        val dialog = AlertDialog.Builder(ctx)
+        val dialog = MaterialAlertDialogBuilder(ctx)
             .setTitle("Tools")
             .setView(dialogView)
             .setNegativeButton("Close", null)
@@ -1023,6 +1295,34 @@ class SearchFragment : Fragment() {
         statsButton.setOnClickListener {
             dialog.dismiss()
             showStatsDialog()
+        }
+        settingsButton.setOnClickListener {
+            dialog.dismiss()
+            showSettingsDialog()
+        }
+
+        dialog.show()
+    }
+
+    private fun showSettingsDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
+        val showSliderSwitch =
+            dialogView.findViewById<SwitchMaterial>(R.id.settingsShowTextSimilaritySliderSwitch)
+        showSliderSwitch.isChecked = mSearchViewModel.getShowTextSimilaritySlider()
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Settings")
+            .setView(dialogView)
+            .setNegativeButton("Close", null)
+            .create()
+
+        showSliderSwitch.setOnCheckedChangeListener { _, isChecked ->
+            mSearchViewModel.setShowTextSimilaritySlider(isChecked)
+            applySimilaritySectionState()
+
+            if (!mSearchViewModel.lastSearchIsImageSearch && !mSearchViewModel.lastResultsAreNearDuplicates) {
+                runCompoundTextSearch()
+            }
         }
 
         dialog.show()
@@ -1152,7 +1452,7 @@ class SearchFragment : Fragment() {
         }
 
         var job: Job? = null
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Metadata Tags")
             .setView(progressWrap)
             .setNegativeButton("Cancel") { _, _ -> job?.cancel() }
@@ -1376,7 +1676,7 @@ class SearchFragment : Fragment() {
             }
         }
 
-        val builder = AlertDialog.Builder(requireContext())
+        val builder = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Metadata Tags")
             .setView(listView)
             .setPositiveButton("Copy") { _, _ ->
@@ -1447,7 +1747,7 @@ class SearchFragment : Fragment() {
             isIndeterminate = true
             setPadding(48, 32, 48, 32)
         }
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Metadata Tags")
             .setMessage("Finding images tagged \"$tagDisplay\"…")
             .setView(progress)
@@ -1693,7 +1993,7 @@ class SearchFragment : Fragment() {
             isIndeterminate = true
             setPadding(48, 32, 48, 32)
         }
-        val progressDialog = AlertDialog.Builder(requireContext())
+        val progressDialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Stats")
             .setMessage("Calculating…")
             .setView(progress)
@@ -1763,7 +2063,7 @@ class SearchFragment : Fragment() {
                         )
                     )
                 }
-                AlertDialog.Builder(requireContext())
+                MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Stats")
                     .setView(container)
                     .setPositiveButton("Copy") { _, _ ->
@@ -1794,7 +2094,7 @@ class SearchFragment : Fragment() {
             isIndeterminate = true
             setPadding(48, 32, 48, 32)
         }
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Backup database")
             .setMessage("Writing backup…")
             .setView(progress)
@@ -1848,7 +2148,7 @@ class SearchFragment : Fragment() {
                 .show()
             return
         }
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("Restore database")
             .setMessage("This will replace the current index database on this device. Continue?")
             .setPositiveButton("Choose file") { _, _ ->
@@ -1863,7 +2163,7 @@ class SearchFragment : Fragment() {
             isIndeterminate = true
             setPadding(48, 32, 48, 32)
         }
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Restore database")
             .setMessage("Restoring…")
             .setView(progress)
@@ -1904,7 +2204,7 @@ class SearchFragment : Fragment() {
                     return@withContext
                 }
 
-                AlertDialog.Builder(requireContext())
+                MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Restore complete")
                     .setMessage("Database restored. Restart the app to use the restored index.")
                     .setPositiveButton("Restart now") { _, _ ->
@@ -1963,7 +2263,7 @@ class SearchFragment : Fragment() {
             isIndeterminate = true
             setPadding(48, 32, 48, 32)
         }
-        val progressDialog = AlertDialog.Builder(requireContext())
+        val progressDialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("Finding near-duplicates…")
             .setMessage("Scanning embeddings (threshold ≥ ${String.format(Locale.US, "%.2f", threshold)})")
             .setView(progress)
@@ -2196,11 +2496,7 @@ class SearchFragment : Fragment() {
         val showDimensions =
             (isImageSearch && mSearchViewModel.showImageSearchDimensions) ||
                 (mSearchViewModel.lastResultsAreNearDuplicates && mSearchViewModel.showNearDuplicateDimensions)
-        imageSimilaritySection?.visibility = if (isImageSearch) View.VISIBLE else View.GONE
-        topButtonsRow?.let { row ->
-            val bottomPaddingPx = if (isImageSearch) 0 else 30
-            row.setPadding(row.paddingLeft, row.paddingTop, row.paddingRight, bottomPaddingPx)
-        }
+        applySimilaritySectionState()
         imageAdapter = ImageAdapter(
             requireContext(),
             results,

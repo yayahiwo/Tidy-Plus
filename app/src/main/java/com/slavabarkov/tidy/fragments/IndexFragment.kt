@@ -25,6 +25,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.slavabarkov.tidy.TidySettings
 import com.slavabarkov.tidy.viewmodels.ORTImageViewModel
 import com.slavabarkov.tidy.R
@@ -213,7 +214,7 @@ class IndexFragment : Fragment() {
                     }
                 }
 
-                AlertDialog.Builder(requireContext())
+                MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Folders to index")
                     .setMultiChoiceItems(items.toTypedArray(), checked) { _, which, isChecked ->
                         if (which == 0) {

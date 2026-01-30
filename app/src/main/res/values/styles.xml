@@ -1,0 +1,46 @@
+<resources>
+    <style name="Tidy" />
+
+    <style name="Tidy.SectionTitle" parent="Tidy">
+        <item name="android:textAppearance">?attr/textAppearanceSubtitle1</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:gravity">center</item>
+    </style>
+
+    <style name="Tidy.SectionCount" parent="Tidy">
+        <item name="android:textAppearance">?attr/textAppearanceBody2</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:alpha">0.8</item>
+        <item name="android:gravity">center</item>
+    </style>
+
+    <style name="ThemeOverlay.TIDY.MaterialAlertDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Tidy.DialogActionButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.Tidy.DialogActionButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.Tidy.DialogActionButton</item>
+    </style>
+
+    <style name="Widget.Tidy.DialogActionButton" parent="Widget.MaterialComponents.Button.TextButton.Dialog">
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+
+    <style name="Widget.Tidy.ToolsDialogButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="iconTint">?attr/colorOnSurface</item>
+        <item name="strokeColor">?attr/colorOnSurface</item>
+    </style>
+
+    <style name="Widget.Tidy.IconButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:padding">0dp</item>
+        <item name="android:gravity">center</item>
+        <item name="iconTint">?attr/colorOnSurface</item>
+        <item name="iconPadding">0dp</item>
+        <item name="rippleColor">?attr/colorControlHighlight</item>
+        <item name="strokeWidth">0dp</item>
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="cornerRadius">24dp</item>
+    </style>
+</resources>

@@ -1,0 +1,16 @@
+<resources>
+    <!-- Spacing -->
+    <dimen name="tidy_space_xs">6dp</dimen>
+    <dimen name="tidy_space_sm">8dp</dimen>
+    <dimen name="tidy_space_md">12dp</dimen>
+    <dimen name="tidy_space_lg">16dp</dimen>
+    <dimen name="tidy_space_xl">24dp</dimen>
+
+    <!-- Common paddings/margins -->
+    <dimen name="tidy_screen_h_margin">12dp</dimen>
+    <dimen name="tidy_text_field_inner_padding_start">12dp</dimen>
+    <dimen name="tidy_section_title_margin_top">8dp</dimen>
+    <dimen name="tidy_section_block_margin_bottom">10dp</dimen>
+    <dimen name="tidy_dialog_h_padding">24dp</dimen>
+</resources>
+
