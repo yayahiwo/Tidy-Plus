@@ -45,6 +45,8 @@ import com.slavabarkov.tidy.TidySettings
 import com.slavabarkov.tidy.viewmodels.SearchViewModel
 import com.slavabarkov.tidy.adapters.ImageAdapter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -59,7 +61,7 @@ class SearchFragment : Fragment() {
     private var imageSimilaritySection: View? = null
     private var imageSimilaritySeekBar: SeekBar? = null
     private var imageSimilarityValue: TextView? = null
-    private var indexFoldersButton: Button? = null
+    private var toolsButton: Button? = null
     private var imageCountText: TextView? = null
     private var backToAllImagesButton: Button? = null
     private var sortBySimilarityButton: Button? = null
@@ -76,6 +78,7 @@ class SearchFragment : Fragment() {
     private var reindexProgressText: TextView? = null
     private var reindexProgressBar: ProgressBar? = null
     private var reindexCountText: TextView? = null
+    private var findDuplicatesJob: Job? = null
     private val mORTImageViewModel: ORTImageViewModel by activityViewModels()
     private val mORTTextViewModel: ORTTextViewModel by activityViewModels()
     private val mSearchViewModel: SearchViewModel by activityViewModels()
@@ -298,6 +301,7 @@ class SearchFragment : Fragment() {
         backToAllImagesButton?.setOnClickListener {
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
+            mSearchViewModel.showBackToAllImages = false
             mSearchViewModel.lastSearchEmbedding = null
             mSearchViewModel.similaritySortActive = false
             mSearchViewModel.similaritySortBaseResults = null
@@ -344,10 +348,8 @@ class SearchFragment : Fragment() {
             updateSelectionUI()
         }
 
-        indexFoldersButton = view.findViewById(R.id.indexFoldersButton)
-        indexFoldersButton?.setOnClickListener {
-            showIndexFoldersDialog()
-        }
+        toolsButton = view.findViewById(R.id.indexFoldersButton)
+        toolsButton?.setOnClickListener { showToolsDialog() }
 
         searchButton?.setOnClickListener {
             val textEmbedding: FloatArray =
@@ -374,6 +376,7 @@ class SearchFragment : Fragment() {
             searchText?.text = null
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
+            mSearchViewModel.showBackToAllImages = false
             mSearchViewModel.lastSearchEmbedding = null
             mSearchViewModel.similaritySortActive = false
             mSearchViewModel.similaritySortBaseResults = null
@@ -763,6 +766,7 @@ class SearchFragment : Fragment() {
                         mSearchViewModel.searchResults = null
                         mSearchViewModel.clearSelection()
                         mSearchViewModel.lastSearchIsImageSearch = false
+                        mSearchViewModel.showBackToAllImages = false
                         mSearchViewModel.lastSearchEmbedding = null
                         mSearchViewModel.similaritySortActive = false
                         mSearchViewModel.similaritySortBaseResults = null
@@ -811,10 +815,191 @@ class SearchFragment : Fragment() {
         reindexProgressContainer?.visibility = View.GONE
 
         mSearchViewModel.lastSearchIsImageSearch = false
+        mSearchViewModel.showBackToAllImages = false
         mSearchViewModel.lastSearchEmbedding = null
         mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
         setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
         recyclerView.scrollToPosition(0)
+    }
+
+    private fun showToolsDialog() {
+        val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_tools, null)
+        val foldersButton = dialogView.findViewById<Button>(R.id.toolsFoldersButton)
+        val duplicatesButton = dialogView.findViewById<Button>(R.id.toolsDuplicatesButton)
+
+        val indexing = (mORTImageViewModel.isIndexing.value == true)
+        duplicatesButton.isEnabled = !indexing
+        if (indexing) {
+            duplicatesButton.text = "Find near-duplicates (finish indexing first)"
+        }
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setTitle("Tools")
+            .setView(dialogView)
+            .setNegativeButton("Close", null)
+            .create()
+
+        foldersButton.setOnClickListener {
+            dialog.dismiss()
+            showIndexFoldersDialog()
+        }
+        duplicatesButton.setOnClickListener {
+            dialog.dismiss()
+            startFindNearDuplicates(threshold = 0.99f)
+        }
+
+        dialog.show()
+    }
+
+    private class IntList(initialCapacity: Int = 8) {
+        var arr: IntArray = IntArray(initialCapacity)
+        var size: Int = 0
+
+        fun add(value: Int) {
+            if (size == arr.size) arr = arr.copyOf(maxOf(8, arr.size * 2))
+            arr[size] = value
+            size += 1
+        }
+    }
+
+    private fun fastDot(a: FloatArray, b: FloatArray): Float {
+        val n = minOf(a.size, b.size)
+        var sum = 0.0f
+        for (i in 0 until n) sum += a[i] * b[i]
+        return sum
+    }
+
+    private fun startFindNearDuplicates(threshold: Float) {
+        if (mORTImageViewModel.isIndexing.value == true) {
+            Toast.makeText(requireContext(), "Wait for indexing to finish first", Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+        if (findDuplicatesJob?.isActive == true) return
+
+        val ids = mORTImageViewModel.idxList
+        val embeddings = mORTImageViewModel.embeddingsList
+        if (ids.isEmpty() || embeddings.isEmpty() || ids.size != embeddings.size) {
+            Toast.makeText(requireContext(), "Index is not ready", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val progress = ProgressBar(requireContext()).apply {
+            isIndeterminate = true
+            setPadding(48, 32, 48, 32)
+        }
+        val progressDialog = AlertDialog.Builder(requireContext())
+            .setTitle("Finding near-duplicates…")
+            .setMessage("Scanning embeddings (threshold ≥ ${String.format(Locale.US, "%.2f", threshold)})")
+            .setView(progress)
+            .setNegativeButton("Cancel") { _, _ -> findDuplicatesJob?.cancel() }
+            .setCancelable(false)
+            .create()
+
+        progressDialog.show()
+
+        findDuplicatesJob = lifecycleScope.launch(Dispatchers.Default) {
+            val duplicateFlags = BooleanArray(ids.size)
+            val dim = embeddings[0].size
+            val sigBits = minOf(64, dim)
+
+            val selectedDims = IntArray(sigBits)
+            run {
+                val used = BooleanArray(dim)
+                val rng = java.util.Random(1337L)
+                var filled = 0
+                while (filled < sigBits) {
+                    val idx = rng.nextInt(dim)
+                    if (used[idx]) continue
+                    used[idx] = true
+                    selectedDims[filled] = idx
+                    filled += 1
+                }
+            }
+
+            fun signature(e: FloatArray): Long {
+                var sig = 0L
+                for (b in 0 until sigBits) {
+                    if (e[selectedDims[b]] >= 0f) sig = sig or (1L shl b)
+                }
+                return sig
+            }
+
+            val tableCount = minOf(4, ((sigBits + 15) / 16).coerceAtLeast(1))
+            val tables: Array<HashMap<Int, IntList>> = Array(tableCount) { HashMap() }
+            val signatures = LongArray(ids.size)
+            for (i in ids.indices) {
+                if (!isActive) return@launch
+                val sig = signature(embeddings[i])
+                signatures[i] = sig
+                for (t in 0 until tableCount) {
+                    val key = ((sig ushr (t * 16)) and 0xFFFF).toInt()
+                    val list = tables[t].getOrPut(key) { IntList() }
+                    list.add(i)
+                }
+            }
+
+            val candidateSet = HashSet<Int>(128)
+            for (i in ids.indices) {
+                if (!isActive) return@launch
+                candidateSet.clear()
+
+                val sig = signatures[i]
+                for (t in 0 until tableCount) {
+                    val key = ((sig ushr (t * 16)) and 0xFFFF).toInt()
+                    val list = tables[t][key] ?: continue
+                    val arr = list.arr
+                    val sz = list.size
+                    for (k in 0 until sz) {
+                        val j = arr[k]
+                        if (j > i) candidateSet.add(j)
+                    }
+                }
+
+                if (candidateSet.isEmpty()) continue
+                val a = embeddings[i]
+                for (j in candidateSet) {
+                    val b = embeddings[j]
+                    if (a.size != b.size) continue
+                    if (fastDot(a, b) >= threshold) {
+                        duplicateFlags[i] = true
+                        duplicateFlags[j] = true
+                    }
+                }
+            }
+
+            val dupIds = ArrayList<Long>()
+            for (i in ids.size - 1 downTo 0) {
+                if (duplicateFlags[i]) dupIds.add(ids[i])
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                progressDialog.dismiss()
+
+                if (dupIds.isEmpty()) {
+                    Toast.makeText(requireContext(), "No near-duplicates found", Toast.LENGTH_SHORT)
+                        .show()
+                    return@withContext
+                }
+
+                mSearchViewModel.searchResults = dupIds
+                mSearchViewModel.lastSearchIsImageSearch = false
+                mSearchViewModel.showBackToAllImages = true
+                mSearchViewModel.lastSearchEmbedding = null
+                mSearchViewModel.similaritySortActive = false
+                mSearchViewModel.similaritySortBaseResults = null
+                mSearchViewModel.clearSelection()
+                imageAdapter?.clearSelection()
+
+                val rv = recyclerView ?: return@withContext
+                setResults(rv, dupIds)
+                rv.scrollToPosition(0)
+                Toast.makeText(requireContext(), "Found ${dupIds.size} near-duplicates", Toast.LENGTH_SHORT)
+                    .show()
+            }
+        }
     }
 
     private fun queryImageBuckets(ctx: android.content.Context): List<Pair<Long, String>> {
@@ -940,7 +1125,7 @@ class SearchFragment : Fragment() {
         selectedCountText?.text = "Selected: $count"
         selectionActions?.visibility = if (count > 0) View.VISIBLE else View.GONE
         backToAllImagesButton?.visibility =
-            if (mSearchViewModel.lastSearchIsImageSearch) View.VISIBLE else View.GONE
+            if (mSearchViewModel.lastSearchIsImageSearch || mSearchViewModel.showBackToAllImages) View.VISIBLE else View.GONE
     }
 
     private fun startDelete(ids: List<Long>) {

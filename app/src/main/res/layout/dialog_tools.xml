@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingLeft="24dp"
+    android:paddingRight="24dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="8dp">
+
+    <Button
+        android:id="@+id/toolsFoldersButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Folders to index"
+        app:icon="@drawable/ic_folder"
+        app:iconTint="?attr/colorOnSurface"
+        app:iconPadding="12dp"
+        app:iconSize="22dp" />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="10dp" />
+
+    <Button
+        android:id="@+id/toolsDuplicatesButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Find near-duplicates (≥ 0.99)"
+        app:icon="@drawable/ic_stacked_files"
+        app:iconTint="?attr/colorOnSurface"
+        app:iconPadding="12dp"
+        app:iconSize="22dp" />
+
+</LinearLayout>
+

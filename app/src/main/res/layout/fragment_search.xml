@@ -109,11 +109,11 @@
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="Folders"
+                android:contentDescription="Tools"
                 android:minHeight="48dp"
                 android:minWidth="48dp"
                 android:text=""
-                app:icon="@drawable/ic_folder"
+                app:icon="@drawable/ic_settings"
                 app:iconPadding="0dp"
                 app:iconSize="24dp"
                 app:iconTint="?attr/colorOnSurface" />

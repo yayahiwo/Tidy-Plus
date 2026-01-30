@@ -58,9 +58,11 @@ android {
             // Maximize release optimizations (R8 shrinking/obfuscation + resource shrinking).
             minifyEnabled true
             shrinkResources true
-            if (tidyReleaseSigningConfigured) {
-                signingConfig signingConfigs.release
-            }
+            // For local/dev builds, don't require a release keystore. If a release keystore is
+            // configured (keystore.properties / env vars / Android Studio injected signing),
+            // use it; otherwise sign with the default debug keystore so Android Studio/CLI builds
+            // don't fail.
+            signingConfig tidyReleaseSigningConfigured ? signingConfigs.release : signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -70,27 +72,6 @@ android {
     }
     kotlinOptions {
         jvmTarget = '17'
-    }
-}
-
-// Don't fail Android Studio sync/configuration just because release signing isn't set up.
-// Instead, fail only if a release APK/AAB is actually being built without signing credentials.
-gradle.taskGraph.whenReady { graph ->
-    def isReleaseBuild = graph.allTasks.any { task ->
-        task.project == project && task.name.toLowerCase().contains("release") && (
-                task.name.toLowerCase().contains("assemble") ||
-                        task.name.toLowerCase().contains("bundle") ||
-                        task.name.toLowerCase().contains("package") ||
-                        task.name.toLowerCase().contains("validateSigning")
-        )
-    }
-    if (isReleaseBuild && !tidyReleaseSigningConfigured) {
-        throw new GradleException(
-                "Release signing isn't configured.\n" +
-                        "Create ${tidyKeystorePropsFile} (recommended) with storeFile/storePassword/keyAlias/keyPassword, " +
-                        "or set env vars: TIDY_KEYSTORE_PATH, TIDY_KEYSTORE_PASSWORD, TIDY_KEY_ALIAS, TIDY_KEY_PASSWORD.\n" +
-                        "Android Studio's \"Generate Signed Bundle / APK\" should also work (it injects signing properties at build time)."
-        )
     }
 }
 

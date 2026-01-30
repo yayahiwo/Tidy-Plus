@@ -15,6 +15,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     var fromImg2ImgFlag: Boolean = false
     var lastSearchEmbedding: FloatArray? = null
     var lastSearchIsImageSearch: Boolean = false
+    var showBackToAllImages: Boolean = false
     var startupRequested: Boolean = false
     var pendingIndexRefresh: Boolean = false
     var indexPaused: Boolean = false
