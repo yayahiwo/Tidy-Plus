@@ -487,6 +487,18 @@ class SearchFragment : Fragment() {
         val visible = tokens.isNotEmpty()
         group.visibility = if (visible) View.VISIBLE else View.GONE
 
+        // When chips exist, keep the input area compact so chips remain visible (especially in portrait).
+        (searchText?.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+            if (visible) {
+                lp.weight = 0f
+                lp.width = dpToPx(140)
+            } else {
+                lp.weight = 1f
+                lp.width = 0
+            }
+            searchText?.layoutParams = lp
+        }
+
         for (token in tokens) {
             val chip = Chip(requireContext()).apply {
                 text = token
@@ -507,8 +519,12 @@ class SearchFragment : Fragment() {
         refreshSearchStartIcon()
     }
 
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
+    }
+
     private fun styleSearchChip(chip: Chip) {
-        val fg = MaterialColors.getColor(chip, com.google.android.material.R.attr.colorOnSurface)
+        val fg = ColorUtils.setAlphaComponent(Color.BLACK, 222) // ~87% black for contrast on white chips
         val bg = ColorUtils.setAlphaComponent(Color.WHITE, 128) // 50% translucent
         chip.chipBackgroundColor = ColorStateList.valueOf(bg)
         chip.setTextColor(fg)
