@@ -35,6 +35,18 @@
         app:iconPadding="12dp"
         app:iconSize="22dp" />
 
+    <Button
+        android:id="@+id/toolsSortButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Sort by similarity"
+        app:icon="@drawable/ic_sort"
+        app:iconTint="?attr/colorOnSurface"
+        app:iconPadding="12dp"
+        app:iconSize="22dp" />
+
     <Space
         android:layout_width="match_parent"
         android:layout_height="10dp" />
