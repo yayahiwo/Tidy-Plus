@@ -16,6 +16,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     var lastSearchEmbedding: FloatArray? = null
     var lastSearchIsImageSearch: Boolean = false
     var showBackToAllImages: Boolean = false
+    var lastResultsAreNearDuplicates: Boolean = false
+    var showNearDuplicateDimensions: Boolean = true
     var startupRequested: Boolean = false
     var pendingIndexRefresh: Boolean = false
     var indexPaused: Boolean = false

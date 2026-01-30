@@ -302,6 +302,7 @@ class SearchFragment : Fragment() {
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
             mSearchViewModel.showBackToAllImages = false
+            mSearchViewModel.lastResultsAreNearDuplicates = false
             mSearchViewModel.lastSearchEmbedding = null
             mSearchViewModel.similaritySortActive = false
             mSearchViewModel.similaritySortBaseResults = null
@@ -317,6 +318,14 @@ class SearchFragment : Fragment() {
                     (recyclerView.layoutManager as? GridLayoutManager)?.findFirstVisibleItemPosition()
                         ?.coerceAtLeast(0) ?: 0
                 mSearchViewModel.showImageSearchDimensions = !mSearchViewModel.showImageSearchDimensions
+                setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
+                recyclerView.scrollToPosition(firstVisible)
+            } else if (mSearchViewModel.lastResultsAreNearDuplicates) {
+                val firstVisible =
+                    (recyclerView.layoutManager as? GridLayoutManager)?.findFirstVisibleItemPosition()
+                        ?.coerceAtLeast(0) ?: 0
+                mSearchViewModel.showNearDuplicateDimensions =
+                    !mSearchViewModel.showNearDuplicateDimensions
                 setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
                 recyclerView.scrollToPosition(firstVisible)
             } else {
@@ -360,6 +369,8 @@ class SearchFragment : Fragment() {
                 mORTImageViewModel.idxList,
                 isImageSearch = false
             )
+            mSearchViewModel.lastResultsAreNearDuplicates = false
+            mSearchViewModel.showBackToAllImages = false
             setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
         }
 
@@ -377,6 +388,7 @@ class SearchFragment : Fragment() {
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
             mSearchViewModel.showBackToAllImages = false
+            mSearchViewModel.lastResultsAreNearDuplicates = false
             mSearchViewModel.lastSearchEmbedding = null
             mSearchViewModel.similaritySortActive = false
             mSearchViewModel.similaritySortBaseResults = null
@@ -532,6 +544,8 @@ class SearchFragment : Fragment() {
         reindexCountText?.text = "Indexed photos: ${mORTImageViewModel.indexedCount.value ?: 0}"
 
         mSearchViewModel.lastSearchIsImageSearch = false
+        mSearchViewModel.showBackToAllImages = false
+        mSearchViewModel.lastResultsAreNearDuplicates = false
         mSearchViewModel.lastSearchEmbedding = null
         mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
         setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
@@ -767,6 +781,7 @@ class SearchFragment : Fragment() {
                         mSearchViewModel.clearSelection()
                         mSearchViewModel.lastSearchIsImageSearch = false
                         mSearchViewModel.showBackToAllImages = false
+                        mSearchViewModel.lastResultsAreNearDuplicates = false
                         mSearchViewModel.lastSearchEmbedding = null
                         mSearchViewModel.similaritySortActive = false
                         mSearchViewModel.similaritySortBaseResults = null
@@ -816,6 +831,7 @@ class SearchFragment : Fragment() {
 
         mSearchViewModel.lastSearchIsImageSearch = false
         mSearchViewModel.showBackToAllImages = false
+        mSearchViewModel.lastResultsAreNearDuplicates = false
         mSearchViewModel.lastSearchEmbedding = null
         mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
         setResults(recyclerView, mSearchViewModel.searchResults ?: emptyList())
@@ -1062,6 +1078,7 @@ class SearchFragment : Fragment() {
                 mSearchViewModel.searchResults = dupIds
                 mSearchViewModel.lastSearchIsImageSearch = false
                 mSearchViewModel.showBackToAllImages = true
+                mSearchViewModel.lastResultsAreNearDuplicates = true
                 mSearchViewModel.lastSearchEmbedding = null
                 mSearchViewModel.similaritySortActive = false
                 mSearchViewModel.similaritySortBaseResults = null
@@ -1112,7 +1129,9 @@ class SearchFragment : Fragment() {
         imageCountText?.text = results.size.toString()
 
         val isImageSearch = mSearchViewModel.lastSearchIsImageSearch
-        val showDimensions = isImageSearch && mSearchViewModel.showImageSearchDimensions
+        val showDimensions =
+            (isImageSearch && mSearchViewModel.showImageSearchDimensions) ||
+                (mSearchViewModel.lastResultsAreNearDuplicates && mSearchViewModel.showNearDuplicateDimensions)
         imageSimilaritySection?.visibility = if (isImageSearch) View.VISIBLE else View.GONE
         topButtonsRow?.let { row ->
             val bottomPaddingPx = if (isImageSearch) 0 else 30
@@ -1142,6 +1161,11 @@ class SearchFragment : Fragment() {
             button.setIconResource(R.drawable.ic_info)
             button.contentDescription =
                 if (mSearchViewModel.showImageSearchDimensions) "Hide dimensions"
+                else "Show dimensions"
+        } else if (mSearchViewModel.lastResultsAreNearDuplicates) {
+            button.setIconResource(R.drawable.ic_info)
+            button.contentDescription =
+                if (mSearchViewModel.showNearDuplicateDimensions) "Hide dimensions"
                 else "Show dimensions"
         } else {
             button.setIconResource(R.drawable.ic_sort)

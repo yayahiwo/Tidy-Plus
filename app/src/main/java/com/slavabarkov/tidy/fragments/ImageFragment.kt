@@ -96,6 +96,8 @@ class ImageFragment : Fragment() {
         buttonBackToAllImages.setOnClickListener {
             mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
             mSearchViewModel.lastSearchIsImageSearch = false
+            mSearchViewModel.showBackToAllImages = false
+            mSearchViewModel.lastResultsAreNearDuplicates = false
             mSearchViewModel.lastSearchEmbedding = null
             mSearchViewModel.clearSelection()
             mSearchViewModel.fromImg2ImgFlag = true
@@ -125,6 +127,8 @@ class ImageFragment : Fragment() {
                     isImageSearch = true
                 )
             }
+            mSearchViewModel.showBackToAllImages = true
+            mSearchViewModel.lastResultsAreNearDuplicates = false
             mSearchViewModel.fromImg2ImgFlag = true
             parentFragmentManager.popBackStack()
         }
