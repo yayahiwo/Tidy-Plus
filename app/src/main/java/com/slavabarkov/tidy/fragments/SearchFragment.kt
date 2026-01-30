@@ -953,6 +953,31 @@ class SearchFragment : Fragment() {
             return
         }
 
+        val bucketIds = mSearchViewModel.getIndexedBucketIds()
+        val scopeKey = buildMetadataTagsScopeKey(bucketIds)
+        val cachedCounts = mSearchViewModel.metadataTagCountsByNorm
+        val cachedIdsByTag = mSearchViewModel.metadataTagImageIdsByNorm
+        val cachedDisplayByTag = mSearchViewModel.metadataTagDisplayByNorm
+        val cachedScopeLabel = mSearchViewModel.metadataTagsCacheScopeLabel
+        val cachedScanned = mSearchViewModel.metadataTagsCacheScannedImages
+        val cachedTagged = mSearchViewModel.metadataTagsCacheTaggedImages
+
+        if (mSearchViewModel.metadataTagsCacheKey == scopeKey &&
+            cachedCounts.isNotEmpty() &&
+            cachedIdsByTag.isNotEmpty()
+        ) {
+            showMetadataTagsListDialog(
+                shown = cachedCounts.entries.toList(),
+                displayByNorm = cachedDisplayByTag,
+                scopeLabel = cachedScopeLabel ?: "Cached",
+                scanned = cachedScanned,
+                taggedImages = cachedTagged,
+                totalUniqueTags = cachedCounts.size,
+                allowRescan = true
+            )
+            return
+        }
+
         val statusText = TextView(requireContext()).apply {
             setPadding(48, 24, 48, 0)
             text = "Preparing…"
@@ -986,9 +1011,11 @@ class SearchFragment : Fragment() {
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.Images.Media.DATA,
             )
 
-            val bucketIds = mSearchViewModel.getIndexedBucketIds()
             val selection: String?
             val selectionArgs: Array<String>?
             val scopeLabel: String
@@ -1003,28 +1030,45 @@ class SearchFragment : Fragment() {
                 scopeLabel = "${bucketIds.size} folder(s)"
             }
 
-            val ids = ArrayList<Long>(4096)
+            data class MediaRow(val id: Long, val location: String?)
+            val rows = ArrayList<MediaRow>(4096)
             appCtx.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                val relPathCol = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                val displayNameCol = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                val dataCol = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
                 while (cursor.moveToNext()) {
                     if (!isActive) return@launch
                     val bucketName = cursor.getString(bucketNameCol)
                     if (bucketName == "Screenshots") continue
-                    ids.add(cursor.getLong(idCol))
+
+                    val id = cursor.getLong(idCol)
+                    val relPath = if (relPathCol >= 0) cursor.getString(relPathCol) else null
+                    val displayName = if (displayNameCol >= 0) cursor.getString(displayNameCol) else null
+                    val dataPath = if (dataCol >= 0) cursor.getString(dataCol) else null
+                    val location = when {
+                        !relPath.isNullOrBlank() && !displayName.isNullOrBlank() -> relPath + displayName
+                        !dataPath.isNullOrBlank() -> dataPath
+                        !displayName.isNullOrBlank() -> displayName
+                        else -> null
+                    }
+                    rows.add(MediaRow(id = id, location = location))
                 }
             }
 
             val counts = HashMap<String, Long>(1024)
             val casing = HashMap<String, String>(1024)
+            val idsByTag = HashMap<String, LongArrayList>(1024)
+            val locationById = HashMap<Long, String>(1024)
             var processed = 0
             var taggedImages = 0
 
-            for (id in ids) {
+            for (row in rows) {
                 if (!isActive) return@launch
                 processed++
 
-                val imageUri = ContentUris.withAppendedId(uri, id)
+                val imageUri = ContentUris.withAppendedId(uri, row.id)
                 val xmp = try {
                     appCtx.contentResolver.openInputStream(imageUri)?.use { input ->
                         val exif = ExifInterface(input)
@@ -1046,15 +1090,19 @@ class SearchFragment : Fragment() {
                             if (!unique.add(norm)) continue
                             casing.putIfAbsent(norm, trimmed)
                             counts[norm] = (counts[norm] ?: 0L) + 1L
+                            idsByTag.getOrPut(norm) { LongArrayList() }.add(row.id)
+                        }
+                        if (!row.location.isNullOrBlank()) {
+                            locationById[row.id] = row.location
                         }
                     }
                 }
 
-                if (processed % 100 == 0 || processed == ids.size) {
-                    val frac = if (ids.isEmpty()) 0.0 else processed.toDouble() / ids.size.toDouble()
+                if (processed % 100 == 0 || processed == rows.size) {
+                    val frac = if (rows.isEmpty()) 0.0 else processed.toDouble() / rows.size.toDouble()
                     withContext(Dispatchers.Main) {
                         if (!isAdded) return@withContext
-                        statusText.text = "Scanning metadata tags… $processed / ${ids.size} ($scopeLabel)"
+                        statusText.text = "Scanning metadata tags… $processed / ${rows.size} ($scopeLabel)"
                         progressBar.progress = (frac * progressBar.max).toInt().coerceIn(0, progressBar.max)
                     }
                 }
@@ -1065,18 +1113,6 @@ class SearchFragment : Fragment() {
 
             val maxToShow = 2000
             val shown = sorted.take(maxToShow)
-            val lines = shown.joinToString("\n") { (norm, c) ->
-                "${casing[norm] ?: norm}: $c"
-            }
-            val header = buildString {
-                appendLine("Scope: $scopeLabel (excluding Screenshots)")
-                appendLine("Images scanned: ${ids.size}")
-                appendLine("Images with tags: $taggedImages")
-                appendLine("Unique tags: ${counts.size}")
-                if (sorted.size > maxToShow) appendLine("Showing top $maxToShow tags:")
-                else appendLine("Tags:")
-            }
-            val reportText = header + "\n" + lines
 
             withContext(Dispatchers.Main) {
                 if (!isAdded) return@withContext
@@ -1085,54 +1121,167 @@ class SearchFragment : Fragment() {
                 } catch (_: Exception) {
                 }
 
-                // Show list for navigation, with a Copy button for the report.
-                val displayItems = shown.map { (norm, c) ->
-                    "${casing[norm] ?: norm} ($c)"
+                // Cache results so future opens/clicks don't rescan.
+                mSearchViewModel.metadataTagsCacheKey = scopeKey
+                mSearchViewModel.metadataTagsCacheScopeLabel = scopeLabel
+                mSearchViewModel.metadataTagsCacheScannedImages = rows.size
+                mSearchViewModel.metadataTagsCacheTaggedImages = taggedImages
+                mSearchViewModel.metadataTagCountsByNorm.clear()
+                mSearchViewModel.metadataTagDisplayByNorm.clear()
+                mSearchViewModel.metadataTagImageIdsByNorm.clear()
+                mSearchViewModel.metadataTagImageLocationById.clear()
+
+                for ((k, v) in counts.entries.sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenBy { it.key })) {
+                    mSearchViewModel.metadataTagCountsByNorm[k] = v
                 }
-                val norms = shown.map { it.key }
-
-                val listView = android.widget.ListView(requireContext()).apply {
-                    adapter = android.widget.ArrayAdapter(
-                        requireContext(),
-                        android.R.layout.simple_list_item_1,
-                        displayItems
-                    )
-                    setPadding(24, 8, 24, 8)
+                for ((k, v) in casing) {
+                    mSearchViewModel.metadataTagDisplayByNorm[k] = v
                 }
-
-                val headerView = TextView(requireContext()).apply {
-                    setPadding(48, 32, 48, 16)
-                    text = header.trimEnd()
+                for ((k, list) in idsByTag) {
+                    mSearchViewModel.metadataTagImageIdsByNorm[k] = list.toLongArray()
                 }
-                listView.addHeaderView(headerView, null, false)
-
-                val listDialog = AlertDialog.Builder(requireContext())
-                    .setTitle("Metadata Tags")
-                    .setView(listView)
-                    .setPositiveButton("Copy") { _, _ ->
-                        val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("Tidy metadata tags", reportText))
-                        Toast.makeText(requireContext(), "Copied", Toast.LENGTH_SHORT).show()
-                    }
-                    .setNegativeButton("Close", null)
-                    .create()
-
-                listView.setOnItemClickListener { _, _, position, _ ->
-                    // Account for header view at position 0.
-                    val idx = position - 1
-                    if (idx !in norms.indices) return@setOnItemClickListener
-                    val selectedNorm = norms[idx]
-                    listDialog.dismiss()
-                    startShowImagesForMetadataTag(
-                        tagNorm = selectedNorm,
-                        tagDisplay = casing[selectedNorm] ?: selectedNorm,
-                        scopeLabel = scopeLabel
-                    )
+                for ((k, v) in locationById) {
+                    mSearchViewModel.metadataTagImageLocationById[k] = v
                 }
 
-                listDialog.show()
+                showMetadataTagsListDialog(
+                    shown = shown,
+                    displayByNorm = casing,
+                    scopeLabel = scopeLabel,
+                    scanned = rows.size,
+                    taggedImages = taggedImages,
+                    totalUniqueTags = counts.size,
+                    allowRescan = true
+                )
             }
         }
+    }
+
+    private class LongArrayList(initialCapacity: Int = 8) {
+        private var arr: LongArray = LongArray(initialCapacity)
+        private var size: Int = 0
+
+        fun add(value: Long) {
+            if (size == arr.size) arr = arr.copyOf(maxOf(8, arr.size * 2))
+            arr[size] = value
+            size += 1
+        }
+
+        fun toLongArray(): LongArray = arr.copyOf(size)
+    }
+
+    private fun buildMetadataTagsScopeKey(bucketIds: Set<String>): String {
+        if (bucketIds.isEmpty()) return "ALL"
+        return bucketIds.sorted().joinToString(",")
+    }
+
+    private fun showMetadataTagsListDialog(
+        shown: List<Map.Entry<String, Long>>,
+        displayByNorm: Map<String, String>,
+        scopeLabel: String,
+        scanned: Int,
+        taggedImages: Int,
+        totalUniqueTags: Int,
+        allowRescan: Boolean,
+    ) {
+        val maxToShow = 2000
+        val header = buildString {
+            appendLine("Scope: $scopeLabel (excluding Screenshots)")
+            appendLine("Images scanned: $scanned")
+            appendLine("Images with tags: $taggedImages")
+            appendLine("Unique tags: $totalUniqueTags")
+            if (totalUniqueTags > maxToShow) appendLine("Showing top $maxToShow tags:")
+        }.trimEnd()
+
+        val norms = shown.map { it.key }
+        val displayItems = shown.map { (norm, c) ->
+            "${displayByNorm[norm] ?: norm} ($c)"
+        }
+
+        val listView = android.widget.ListView(requireContext()).apply {
+            adapter = android.widget.ArrayAdapter(
+                requireContext(),
+                android.R.layout.simple_list_item_1,
+                displayItems
+            )
+            setPadding(24, 8, 24, 8)
+        }
+
+        val headerView = TextView(requireContext()).apply {
+            setPadding(48, 32, 48, 16)
+            text = header
+        }
+        listView.addHeaderView(headerView, null, false)
+
+        val reportText = buildString {
+            appendLine(header)
+            appendLine()
+            for ((norm, c) in shown) {
+                append(displayByNorm[norm] ?: norm).append(": ").append(c).appendLine()
+            }
+        }
+
+        val builder = AlertDialog.Builder(requireContext())
+            .setTitle("Metadata Tags")
+            .setView(listView)
+            .setPositiveButton("Copy") { _, _ ->
+                val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Tidy metadata tags", reportText))
+                Toast.makeText(requireContext(), "Copied", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+
+        if (allowRescan) {
+            builder.setNeutralButton("Rescan") { _, _ ->
+                mSearchViewModel.clearMetadataTagsCache()
+                showTagsDialogInternal()
+            }
+        }
+
+        val dialog = builder.create()
+
+        listView.setOnItemClickListener { _, _, position, _ ->
+            val idx = position - 1
+            if (idx !in norms.indices) return@setOnItemClickListener
+            val selectedNorm = norms[idx]
+            val display = displayByNorm[selectedNorm] ?: selectedNorm
+            dialog.dismiss()
+            showImagesForMetadataTagFromCacheOrScan(
+                tagNorm = selectedNorm,
+                tagDisplay = display,
+                scopeLabel = scopeLabel
+            )
+        }
+
+        dialog.show()
+    }
+
+    private fun showImagesForMetadataTagFromCacheOrScan(tagNorm: String, tagDisplay: String, scopeLabel: String) {
+        val cached = mSearchViewModel.metadataTagImageIdsByNorm[tagNorm]
+        if (cached != null) {
+            val rv = recyclerView ?: return
+            val list = cached.toList()
+            mSearchViewModel.searchResults = list
+            mSearchViewModel.lastSearchIsImageSearch = false
+            mSearchViewModel.showBackToAllImages = true
+            mSearchViewModel.lastResultsAreNearDuplicates = false
+            mSearchViewModel.lastSearchEmbedding = null
+            mSearchViewModel.similaritySortActive = false
+            mSearchViewModel.similaritySortBaseResults = null
+            mSearchViewModel.clearSelection()
+            imageAdapter?.clearSelection()
+            setResults(rv, list)
+            rv.scrollToPosition(0)
+            Toast.makeText(
+                requireContext(),
+                "Tag \"$tagDisplay\": ${list.size} image(s) ($scopeLabel)",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        // Fallback: no cache available for some reason.
+        startShowImagesForMetadataTag(tagNorm, tagDisplay, scopeLabel)
     }
 
     private fun startShowImagesForMetadataTag(tagNorm: String, tagDisplay: String, scopeLabel: String) {

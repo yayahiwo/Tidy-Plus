@@ -27,6 +27,17 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     var similaritySortActive: Boolean = false
     var similaritySortBaseResults: List<Long>? = null
 
+    // Metadata Tags cache (derived from image XMP dc:subject). This is kept in-memory only to avoid
+    // re-scanning all images on every open/click.
+    var metadataTagsCacheKey: String? = null
+    var metadataTagsCacheScopeLabel: String? = null
+    var metadataTagsCacheScannedImages: Int = 0
+    var metadataTagsCacheTaggedImages: Int = 0
+    val metadataTagCountsByNorm: LinkedHashMap<String, Long> = linkedMapOf()
+    val metadataTagDisplayByNorm: LinkedHashMap<String, String> = linkedMapOf()
+    val metadataTagImageIdsByNorm: LinkedHashMap<String, LongArray> = linkedMapOf()
+    val metadataTagImageLocationById: LinkedHashMap<Long, String> = linkedMapOf()
+
     private val prefs = application.getSharedPreferences(TidySettings.PREFS_NAME, Context.MODE_PRIVATE)
     private var imageSimilarityThreshold: Float =
         prefs.getFloat(
@@ -54,6 +65,9 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             .putStringSet(TidySettings.KEY_INDEXED_BUCKET_IDS, indexedBucketIds)
             .putBoolean(TidySettings.KEY_INDEX_FOLDERS_CONFIGURED, true)
             .apply()
+
+        // Folder scope changed => cached tag scan is stale.
+        clearMetadataTagsCache()
     }
 
     fun getGridSpanCount(): Int = gridSpanCount
@@ -89,5 +103,15 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         selectedImageIds.clear()
     }
 
+    fun clearMetadataTagsCache() {
+        metadataTagsCacheKey = null
+        metadataTagsCacheScopeLabel = null
+        metadataTagsCacheScannedImages = 0
+        metadataTagsCacheTaggedImages = 0
+        metadataTagCountsByNorm.clear()
+        metadataTagDisplayByNorm.clear()
+        metadataTagImageIdsByNorm.clear()
+        metadataTagImageLocationById.clear()
+    }
 
 }
