@@ -44,7 +44,7 @@
         style="@style/Widget.MaterialComponents.Button.OutlinedButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Tags"
+        android:text="Metadata Tags"
         app:icon="@drawable/ic_tag"
         app:iconTint="?attr/colorOnSurface"
         app:iconPadding="12dp"

@@ -875,7 +875,7 @@ class SearchFragment : Fragment() {
         statsButton.isEnabled = !indexing
         if (indexing) {
             duplicatesButton.text = "Find near-duplicates (finish indexing first)"
-            tagsButton.text = "Tags (finish indexing first)"
+            tagsButton.text = "Metadata Tags (finish indexing first)"
             statsButton.text = "Stats (finish indexing first)"
         }
 
@@ -895,7 +895,7 @@ class SearchFragment : Fragment() {
         }
         tagsButton.setOnClickListener {
             dialog.dismiss()
-            showTagsDialog()
+            showMetadataTagsDialog()
         }
         statsButton.setOnClickListener {
             dialog.dismiss()
@@ -937,7 +937,7 @@ class SearchFragment : Fragment() {
         return results
     }
 
-    private fun showTagsDialog() {
+    private fun showMetadataTagsDialog() {
         if (!hasReadPermission()) {
             pendingPermissionAction = PendingPermissionAction.ToolsTags
             permissionsRequest.launch(requiredPermission())
@@ -973,7 +973,7 @@ class SearchFragment : Fragment() {
 
         var job: Job? = null
         val dialog = AlertDialog.Builder(requireContext())
-            .setTitle("Tags")
+            .setTitle("Metadata Tags")
             .setView(progressWrap)
             .setNegativeButton("Cancel") { _, _ -> job?.cancel() }
             .setCancelable(false)
@@ -1054,7 +1054,7 @@ class SearchFragment : Fragment() {
                     val frac = if (ids.isEmpty()) 0.0 else processed.toDouble() / ids.size.toDouble()
                     withContext(Dispatchers.Main) {
                         if (!isAdded) return@withContext
-                        statusText.text = "Scanning tags… $processed / ${ids.size} ($scopeLabel)"
+                        statusText.text = "Scanning metadata tags… $processed / ${ids.size} ($scopeLabel)"
                         progressBar.progress = (frac * progressBar.max).toInt().coerceIn(0, progressBar.max)
                     }
                 }
@@ -1085,22 +1085,143 @@ class SearchFragment : Fragment() {
                 } catch (_: Exception) {
                 }
 
-                val reportView = TextView(requireContext()).apply {
-                    setPadding(48, 32, 48, 16)
-                    setTextIsSelectable(true)
-                    text = reportText
+                // Show list for navigation, with a Copy button for the report.
+                val displayItems = shown.map { (norm, c) ->
+                    "${casing[norm] ?: norm} ($c)"
                 }
-                val scroll = android.widget.ScrollView(requireContext()).apply { addView(reportView) }
-                AlertDialog.Builder(requireContext())
-                    .setTitle("Tags")
-                    .setView(scroll)
+                val norms = shown.map { it.key }
+
+                val listView = android.widget.ListView(requireContext()).apply {
+                    adapter = android.widget.ArrayAdapter(
+                        requireContext(),
+                        android.R.layout.simple_list_item_1,
+                        displayItems
+                    )
+                    setPadding(24, 8, 24, 8)
+                }
+
+                val headerView = TextView(requireContext()).apply {
+                    setPadding(48, 32, 48, 16)
+                    text = header.trimEnd()
+                }
+                listView.addHeaderView(headerView, null, false)
+
+                val listDialog = AlertDialog.Builder(requireContext())
+                    .setTitle("Metadata Tags")
+                    .setView(listView)
                     .setPositiveButton("Copy") { _, _ ->
                         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("Tidy tags", reportText))
+                        cm.setPrimaryClip(ClipData.newPlainText("Tidy metadata tags", reportText))
                         Toast.makeText(requireContext(), "Copied", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Close", null)
-                    .show()
+                    .create()
+
+                listView.setOnItemClickListener { _, _, position, _ ->
+                    // Account for header view at position 0.
+                    val idx = position - 1
+                    if (idx !in norms.indices) return@setOnItemClickListener
+                    val selectedNorm = norms[idx]
+                    listDialog.dismiss()
+                    startShowImagesForMetadataTag(
+                        tagNorm = selectedNorm,
+                        tagDisplay = casing[selectedNorm] ?: selectedNorm,
+                        scopeLabel = scopeLabel
+                    )
+                }
+
+                listDialog.show()
+            }
+        }
+    }
+
+    private fun startShowImagesForMetadataTag(tagNorm: String, tagDisplay: String, scopeLabel: String) {
+        if (!hasReadPermission()) return
+        if (mORTImageViewModel.isIndexing.value == true) return
+
+        val progress = ProgressBar(requireContext()).apply {
+            isIndeterminate = true
+            setPadding(48, 32, 48, 32)
+        }
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle("Metadata Tags")
+            .setMessage("Finding images tagged \"$tagDisplay\"…")
+            .setView(progress)
+            .setNegativeButton("Cancel", null)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+
+        val appCtx = requireContext().applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.BUCKET_ID,
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            )
+
+            val bucketIds = mSearchViewModel.getIndexedBucketIds()
+            val selection: String?
+            val selectionArgs: Array<String>?
+            if (bucketIds.isEmpty()) {
+                selection = null
+                selectionArgs = null
+            } else {
+                val placeholders = bucketIds.joinToString(",") { "?" }
+                selection = "${MediaStore.Images.Media.BUCKET_ID} IN ($placeholders)"
+                selectionArgs = bucketIds.toTypedArray()
+            }
+
+            val matched = ArrayList<Long>(256)
+            appCtx.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val bucketName = cursor.getString(bucketNameCol)
+                    if (bucketName == "Screenshots") continue
+                    val id = cursor.getLong(idCol)
+                    val imageUri = ContentUris.withAppendedId(uri, id)
+                    val xmp = try {
+                        appCtx.contentResolver.openInputStream(imageUri)?.use { input ->
+                            val exif = ExifInterface(input)
+                            exif.getAttribute(ExifInterface.TAG_XMP)
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (xmp.isNullOrBlank()) continue
+                    val kws = extractXmpTagKeywords(xmp)
+                    if (kws.any { it.trim().lowercase(Locale.US) == tagNorm }) {
+                        matched.add(id)
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                try {
+                    dialog.dismiss()
+                } catch (_: Exception) {
+                }
+
+                val rv = recyclerView ?: return@withContext
+                mSearchViewModel.searchResults = matched.reversed()
+                mSearchViewModel.lastSearchIsImageSearch = false
+                mSearchViewModel.showBackToAllImages = true
+                mSearchViewModel.lastResultsAreNearDuplicates = false
+                mSearchViewModel.lastSearchEmbedding = null
+                mSearchViewModel.similaritySortActive = false
+                mSearchViewModel.similaritySortBaseResults = null
+                mSearchViewModel.clearSelection()
+                imageAdapter?.clearSelection()
+                setResults(rv, mSearchViewModel.searchResults ?: emptyList())
+                rv.scrollToPosition(0)
+                Toast.makeText(
+                    requireContext(),
+                    "Tag \"$tagDisplay\": ${matched.size} image(s) ($scopeLabel)",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
