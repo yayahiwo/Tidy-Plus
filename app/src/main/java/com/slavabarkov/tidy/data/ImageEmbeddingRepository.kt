@@ -28,4 +28,8 @@ class ImageEmbeddingRepository(private val imageEmbeddingDao: ImageEmbeddingDao)
     suspend fun getAllIds(): List<Long> {
         return imageEmbeddingDao.getAllIds()
     }
+
+    suspend fun countRecords(): Long {
+        return imageEmbeddingDao.countRecords()
+    }
 }

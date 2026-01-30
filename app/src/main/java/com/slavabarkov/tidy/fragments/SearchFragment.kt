@@ -10,6 +10,8 @@ import android.content.Context
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.MediaStore
@@ -44,6 +46,7 @@ import com.slavabarkov.tidy.R
 import com.slavabarkov.tidy.TidySettings
 import com.slavabarkov.tidy.viewmodels.SearchViewModel
 import com.slavabarkov.tidy.adapters.ImageAdapter
+import com.slavabarkov.tidy.data.ImageEmbeddingDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -91,6 +94,7 @@ class SearchFragment : Fragment() {
     private enum class PendingPermissionAction {
         Startup,
         Reindex,
+        ToolsStats,
     }
 
     private var pendingAction: PendingAction? = null
@@ -114,6 +118,7 @@ class SearchFragment : Fragment() {
         when (action) {
             PendingPermissionAction.Startup -> runStartupFlow()
             PendingPermissionAction.Reindex -> startReindexInternal()
+            PendingPermissionAction.ToolsStats -> showStatsDialogInternal()
             null -> Unit
         }
     }
@@ -843,11 +848,14 @@ class SearchFragment : Fragment() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_tools, null)
         val foldersButton = dialogView.findViewById<Button>(R.id.toolsFoldersButton)
         val duplicatesButton = dialogView.findViewById<Button>(R.id.toolsDuplicatesButton)
+        val statsButton = dialogView.findViewById<Button>(R.id.toolsStatsButton)
 
         val indexing = (mORTImageViewModel.isIndexing.value == true)
         duplicatesButton.isEnabled = !indexing
+        statsButton.isEnabled = !indexing
         if (indexing) {
             duplicatesButton.text = "Find near-duplicates (finish indexing first)"
+            statsButton.text = "Stats (finish indexing first)"
         }
 
         val dialog = AlertDialog.Builder(ctx)
@@ -864,8 +872,217 @@ class SearchFragment : Fragment() {
             dialog.dismiss()
             startFindNearDuplicates(threshold = 0.99f)
         }
+        statsButton.setOnClickListener {
+            dialog.dismiss()
+            showStatsDialog()
+        }
 
         dialog.show()
+    }
+
+    private data class StatsReport(
+        val scopeLabel: String,
+        val totalImages: Long,
+        val totalBytes: Long,
+        val typeCounts: Map<String, Long>,
+        val dbRecords: Long,
+        val dbBytes: Long,
+        val dbWalBytes: Long,
+        val dbShmBytes: Long,
+        val indexedInMemory: Int,
+    )
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0L) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        var v = bytes.toDouble()
+        var idx = 0
+        while (v >= 1024.0 && idx < units.lastIndex) {
+            v /= 1024.0
+            idx++
+        }
+        return String.format(Locale.US, "%.2f %s", v, units[idx])
+    }
+
+    private fun normalizeType(mime: String?, displayName: String?): String {
+        fun extFromName(name: String): String? {
+            val dot = name.lastIndexOf('.')
+            if (dot <= 0 || dot >= name.lastIndex) return null
+            return name.substring(dot + 1).lowercase(Locale.US)
+        }
+
+        val m = mime?.lowercase(Locale.US)
+        val ext = displayName?.let(::extFromName)
+        return when {
+            m == "image/jpeg" || ext == "jpg" || ext == "jpeg" -> "jpeg"
+            m == "image/png" || ext == "png" -> "png"
+            m == "image/bmp" || ext == "bmp" -> "bmp"
+            m == "image/webp" || ext == "webp" -> "webp"
+            m == "image/heic" || ext == "heic" -> "heic"
+            m == "image/heif" || ext == "heif" -> "heif"
+            m == "image/gif" || ext == "gif" -> "gif"
+            ext != null -> ext
+            m != null -> m.removePrefix("image/")
+            else -> "unknown"
+        }
+    }
+
+    private suspend fun computeStatsReport(ctx: Context): StatsReport {
+        val contentResolver = ctx.contentResolver
+        val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+        )
+
+        val bucketIds = mSearchViewModel.getIndexedBucketIds()
+        val selection: String?
+        val selectionArgs: Array<String>?
+        val scopeLabel: String
+        if (bucketIds.isEmpty()) {
+            selection = null
+            selectionArgs = null
+            scopeLabel = "All folders"
+        } else {
+            val placeholders = bucketIds.joinToString(",") { "?" }
+            selection = "${MediaStore.Images.Media.BUCKET_ID} IN ($placeholders)"
+            selectionArgs = bucketIds.toTypedArray()
+            scopeLabel = "${bucketIds.size} folder(s)"
+        }
+
+        var totalImages = 0L
+        var totalBytes = 0L
+        val typeCounts = linkedMapOf<String, Long>()
+
+        contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+            val bucketNameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+            val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+
+            while (cursor.moveToNext()) {
+                val bucketName = cursor.getString(bucketNameCol)
+                if (bucketName == "Screenshots") continue
+
+                totalImages += 1
+                val size = cursor.getLong(sizeCol).coerceAtLeast(0L)
+                totalBytes += size
+                val t = normalizeType(cursor.getString(mimeCol), cursor.getString(nameCol))
+                typeCounts[t] = (typeCounts[t] ?: 0L) + 1L
+            }
+        }
+
+        val db = ImageEmbeddingDatabase.getDatabase(ctx)
+        val dbRecords = try {
+            db.imageEmbeddingDao().countRecords()
+        } catch (_: Exception) {
+            -1L
+        }
+
+        val dbFile = ctx.getDatabasePath("image_embedding_database")
+        val walFile = java.io.File(dbFile.parentFile, dbFile.name + "-wal")
+        val shmFile = java.io.File(dbFile.parentFile, dbFile.name + "-shm")
+        val dbBytes = if (dbFile.exists()) dbFile.length() else 0L
+        val dbWalBytes = if (walFile.exists()) walFile.length() else 0L
+        val dbShmBytes = if (shmFile.exists()) shmFile.length() else 0L
+
+        return StatsReport(
+            scopeLabel = scopeLabel,
+            totalImages = totalImages,
+            totalBytes = totalBytes,
+            typeCounts = typeCounts.toList().sortedByDescending { it.second }.toMap(),
+            dbRecords = dbRecords,
+            dbBytes = dbBytes,
+            dbWalBytes = dbWalBytes,
+            dbShmBytes = dbShmBytes,
+            indexedInMemory = mORTImageViewModel.idxList.size,
+        )
+    }
+
+    private fun formatStatsReport(r: StatsReport): String {
+        val types = r.typeCounts.entries.joinToString("\n") { (k, v) -> "  - $k: $v" }
+        val dbTotal = r.dbBytes + r.dbWalBytes + r.dbShmBytes
+        return buildString {
+            appendLine("Scope: ${r.scopeLabel} (excluding Screenshots)")
+            appendLine("Images on disk: ${r.totalImages}")
+            appendLine("Total size on disk: ${formatBytes(r.totalBytes)} (${r.totalBytes} bytes)")
+            appendLine()
+            appendLine("File types:")
+            appendLine(if (types.isBlank()) "  (none)" else types)
+            appendLine()
+            appendLine("Database:")
+            appendLine("  - records: ${r.dbRecords}")
+            appendLine("  - in-memory indexed: ${r.indexedInMemory}")
+            appendLine("  - db: ${formatBytes(r.dbBytes)}")
+            appendLine("  - wal: ${formatBytes(r.dbWalBytes)}")
+            appendLine("  - shm: ${formatBytes(r.dbShmBytes)}")
+            appendLine("  - total: ${formatBytes(dbTotal)} (${dbTotal} bytes)")
+        }
+    }
+
+    private fun showStatsDialog() {
+        if (!hasReadPermission()) {
+            pendingPermissionAction = PendingPermissionAction.ToolsStats
+            permissionsRequest.launch(requiredPermission())
+            return
+        }
+        showStatsDialogInternal()
+    }
+
+    private fun showStatsDialogInternal() {
+        if (mORTImageViewModel.isIndexing.value == true) {
+            Toast.makeText(requireContext(), "Wait for indexing to finish first", Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+
+        val progress = ProgressBar(requireContext()).apply {
+            isIndeterminate = true
+            setPadding(48, 32, 48, 32)
+        }
+        val progressDialog = AlertDialog.Builder(requireContext())
+            .setTitle("Stats")
+            .setMessage("Calculating…")
+            .setView(progress)
+            .setNegativeButton("Cancel", null)
+            .create()
+        progressDialog.show()
+
+        val appCtx = requireContext().applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            val report = runCatching { computeStatsReport(appCtx) }.getOrNull()
+            val text = if (report == null) "Failed to compute stats." else formatStatsReport(report)
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                try {
+                    progressDialog.dismiss()
+                } catch (_: Exception) {
+                }
+
+                val textView = TextView(requireContext()).apply {
+                    setPadding(48, 32, 48, 16)
+                    setTextIsSelectable(true)
+                    this.text = text
+                }
+                val scroll = android.widget.ScrollView(requireContext()).apply {
+                    addView(textView)
+                }
+                AlertDialog.Builder(requireContext())
+                    .setTitle("Stats")
+                    .setView(scroll)
+                    .setPositiveButton("Copy") { _, _ ->
+                        val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("Tidy stats", text))
+                        Toast.makeText(requireContext(), "Copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }
     }
 
     private class IntList(initialCapacity: Int = 8) {

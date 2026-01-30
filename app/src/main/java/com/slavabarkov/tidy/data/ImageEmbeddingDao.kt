@@ -28,4 +28,7 @@ interface ImageEmbeddingDao {
 
     @Query("SELECT id FROM image_embeddings")
     suspend fun getAllIds(): List<Long>
+
+    @Query("SELECT COUNT(*) FROM image_embeddings")
+    suspend fun countRecords(): Long
 }
