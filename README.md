@@ -24,6 +24,8 @@
 <li> Adjusted single-image navigation so swipe-to-next/previous is handled via PhotoView’s fling callback (and doesn’t break pinch zoom).</li>
 <li> Converted the top-row search screen buttons to icon-only buttons (Search, Back, Clear, Folders) with appropriate icons.</li>
 <li> Updated Gradle config so the project builds with AGP’s Java 17+ requirement (points Gradle to Android Studio’s bundled JDK).</li>
+<li> Added Find near-duplicates tool.</li>
+<li> Added library Stats display.</li> 
 </ul>
 
 
