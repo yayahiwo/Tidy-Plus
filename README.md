@@ -1,10 +1,12 @@
 <H1>Thanks and Credit to https://github.com/slavabarkov for the original Tidy</H1>
 
+<p>I needed the app to do a little bit more than the original Tidy to help me organize and clean my big photo collection, And with the help of AI I was able to add the following functionality:</p>
+
 <p><b>Disclaimer 1</b>: I am not a java developer and can't even understand most of the code in this repository, and also very new to git, I just want to put this here if it's useful to anyone.</p>
 
 <p><b>Disclaimer 2</b>: This software is provided “AS IS”, without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and noninfringement. Use of this app and its source code is at your own risk. The author(s) and contributor(s) are not responsible or liable for any damages, losses, data loss, device issues, security/ privacy incidents, or other harm arising from the use, misuse, or inability to use the software, including actions such as deleting, moving, or modifying files/photos. Always review permissions and keep backups of important data before use.</p>
 
-<p>I needed the app to do a little bit more than the original Tidy to help me organize and clean my big photo collection, And with the help of AI I was able to add the following functionality:</p>
+
 <ul>
 <li> Added image-to-image similarity threshold control (persisted) and applied it to “Find Similar” results filtering.</li>
 <li> Added multi-select in the grid (long-press to enter selection mode + checkboxes/overlay).</li>
