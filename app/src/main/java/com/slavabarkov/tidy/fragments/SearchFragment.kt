@@ -9,6 +9,7 @@ import android.app.RecoverableSecurityException
 import android.content.Context
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ClipboardManager
 import android.content.ClipData
@@ -92,6 +93,8 @@ class SearchFragment : Fragment() {
     private var selectionActions: View? = null
     private var selectedCountText: TextView? = null
     private var moveSelectedButton: ImageButton? = null
+    private var copySelectedButton: ImageButton? = null
+    private var shareSelectedButton: ImageButton? = null
     private var deleteSelectedButton: ImageButton? = null
     private var clearSelectionButton: ImageButton? = null
     private var imageAdapter: ImageAdapter? = null
@@ -129,11 +132,18 @@ class SearchFragment : Fragment() {
         ToolsTags,
     }
 
+    private enum class PendingFolderPickAction {
+        Move,
+        Copy,
+    }
+
     private var pendingAction: PendingAction? = null
     private var pendingDeleteIds: List<Long> = emptyList()
     private var pendingMoveIds: List<Long> = emptyList()
     private var pendingMoveRelativePath: String? = null
     private var pendingPermissionAction: PendingPermissionAction? = null
+    private var pendingFolderPickAction: PendingFolderPickAction? = null
+    private var pendingFolderPickIds: List<Long> = emptyList()
 
     private val permissionsRequest: ActivityResultLauncher<String> = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -177,17 +187,26 @@ class SearchFragment : Fragment() {
 
     private val folderPickerLauncher =
         registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { treeUri ->
+            val action = pendingFolderPickAction
+            pendingFolderPickAction = null
+            val ids = pendingFolderPickIds
+            pendingFolderPickIds = emptyList()
+
             if (treeUri == null) return@registerForActivityResult
             val relativePath = getRelativePathFromTreeUri(treeUri)
             if (relativePath == null) {
                 Toast.makeText(
                     requireContext(),
-                    "Selected folder is not supported for Move",
+                    "Selected folder is not supported",
                     Toast.LENGTH_SHORT
                 ).show()
                 return@registerForActivityResult
             }
-            performMove(pendingMoveIds, relativePath)
+            when (action) {
+                PendingFolderPickAction.Move -> performMove(ids, relativePath)
+                PendingFolderPickAction.Copy -> startCopy(ids, relativePath)
+                null -> Unit
+            }
         }
 
     private val backupDbLauncher =
@@ -369,6 +388,8 @@ class SearchFragment : Fragment() {
         selectionActions = view.findViewById(R.id.selectionActions)
         selectedCountText = view.findViewById(R.id.selectedCountText)
         moveSelectedButton = view.findViewById(R.id.moveSelectedButton)
+        copySelectedButton = view.findViewById(R.id.copySelectedButton)
+        shareSelectedButton = view.findViewById(R.id.shareSelectedButton)
         deleteSelectedButton = view.findViewById(R.id.deleteSelectedButton)
         clearSelectionButton = view.findViewById(R.id.clearSelectionButton)
         updateSelectionUI()
@@ -387,8 +408,28 @@ class SearchFragment : Fragment() {
                     .show()
                 return@setOnClickListener
             }
-            pendingMoveIds = ids
+            pendingFolderPickAction = PendingFolderPickAction.Move
+            pendingFolderPickIds = ids
             folderPickerLauncher.launch(null)
+        }
+
+        copySelectedButton?.setOnClickListener {
+            val ids = mSearchViewModel.selectedImageIds.toList()
+            if (ids.isEmpty()) return@setOnClickListener
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                Toast.makeText(requireContext(), "Copy requires Android 10+", Toast.LENGTH_SHORT)
+                    .show()
+                return@setOnClickListener
+            }
+            pendingFolderPickAction = PendingFolderPickAction.Copy
+            pendingFolderPickIds = ids
+            folderPickerLauncher.launch(null)
+        }
+
+        shareSelectedButton?.setOnClickListener {
+            val ids = mSearchViewModel.selectedImageIds.toList()
+            if (ids.isEmpty()) return@setOnClickListener
+            shareSelectedImages(ids)
         }
 
         clearSelectionButton?.setOnClickListener {
@@ -415,6 +456,129 @@ class SearchFragment : Fragment() {
 
         runStartupFlow()
         return view
+    }
+
+    private fun shareSelectedImages(ids: List<Long>) {
+        val uris = ids.map { ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it) }
+        val intent =
+            if (uris.size == 1) {
+                Intent(Intent.ACTION_SEND).apply {
+                    type = "image/*"
+                    putExtra(Intent.EXTRA_STREAM, uris.first())
+                }
+            } else {
+                Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "image/*"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                }
+            }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(intent, null))
+    }
+
+    private fun startCopy(ids: List<Long>, relativePath: String) {
+        if (ids.isEmpty()) return
+
+        val progress = ProgressBar(requireContext()).apply {
+            isIndeterminate = true
+            setPadding(48, 32, 48, 32)
+        }
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Copy photos")
+            .setMessage("Copying…")
+            .setView(progress)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+
+        val appCtx = requireContext().applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val resolver = appCtx.contentResolver
+                var copied = 0
+
+                fun buildCopyName(displayName: String, ts: Long): String {
+                    val name = displayName.ifBlank { "tidy_copy" }
+                    val dot = name.lastIndexOf('.')
+                    return if (dot in 1 until name.length - 1) {
+                        val base = name.substring(0, dot)
+                        val ext = name.substring(dot)
+                        "${base}_copy_$ts$ext"
+                    } else {
+                        "${name}_copy_$ts"
+                    }
+                }
+
+                for (id in ids) {
+                    val srcUri =
+                        ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    val meta =
+                        resolver.query(
+                            srcUri,
+                            arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE),
+                            null,
+                            null,
+                            null
+                        )?.use { c ->
+                            if (!c.moveToFirst()) return@use null
+                            val name = c.getString(0).orEmpty()
+                            val mime = c.getString(1)
+                            name to mime
+                        }
+
+                    val (displayName, mimeType) = meta ?: continue
+                    val ts = System.currentTimeMillis()
+                    val newName = buildCopyName(displayName, ts)
+
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, newName)
+                        if (!mimeType.isNullOrBlank()) put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    val dstUri =
+                        resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: continue
+
+                    try {
+                        resolver.openInputStream(srcUri)?.use { input ->
+                            resolver.openOutputStream(dstUri, "w")?.use { out ->
+                                input.copyTo(out)
+                                out.flush()
+                            } ?: throw IllegalStateException("Failed to open output stream")
+                        } ?: throw IllegalStateException("Failed to open input stream")
+
+                        val doneValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        }
+                        resolver.update(dstUri, doneValues, null, null)
+                        copied += 1
+                    } catch (_: Exception) {
+                        runCatching { resolver.delete(dstUri, null, null) }
+                    }
+                }
+
+                copied
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                try {
+                    dialog.dismiss()
+                } catch (_: Exception) {
+                }
+
+                if (result.isFailure) {
+                    Toast.makeText(requireContext(), "Copy failed", Toast.LENGTH_SHORT).show()
+                    return@withContext
+                }
+
+                val copied = result.getOrThrow()
+                Toast.makeText(requireContext(), "Copied $copied photo(s)", Toast.LENGTH_SHORT).show()
+                mSearchViewModel.clearSelection()
+                imageAdapter?.clearSelection()
+                updateSelectionUI()
+            }
+        }
     }
 
     private fun runTextSearch() {

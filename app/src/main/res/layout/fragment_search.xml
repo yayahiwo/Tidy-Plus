@@ -310,6 +310,36 @@
             android:layout_height="wrap_content" />
 
         <ImageButton
+            android:id="@+id/copySelectedButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Copy selected"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_copy"
+            android:tint="?attr/colorOnSurface" />
+
+        <Space
+            android:layout_width="8dp"
+            android:layout_height="wrap_content" />
+
+        <ImageButton
+            android:id="@+id/shareSelectedButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Share selected"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_share"
+            android:tint="?attr/colorOnSurface" />
+
+        <Space
+            android:layout_width="8dp"
+            android:layout_height="wrap_content" />
+
+        <ImageButton
             android:id="@+id/deleteSelectedButton"
             android:layout_width="48dp"
             android:layout_height="48dp"

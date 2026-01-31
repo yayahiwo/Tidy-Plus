@@ -4,6 +4,8 @@
 
 package com.slavabarkov.tidy.fragments
 
+import android.app.Activity
+import android.app.RecoverableSecurityException
 import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
@@ -12,7 +14,6 @@ import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.GridLayout
 import android.widget.ImageButton
 import android.widget.TextView
@@ -21,6 +22,8 @@ import androidx.core.net.toUri
 import androidx.exifinterface.media.ExifInterface
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import com.bumptech.glide.Glide
 import com.github.chrisbanes.photoview.PhotoView
 import com.slavabarkov.tidy.R
@@ -45,6 +48,32 @@ class ImageFragment : Fragment() {
     private var basicInfoText: String = ""
     private var exifHeaderText: String? = null
     private var exifGridItems: List<Pair<String, String>>? = null
+
+    private enum class PendingAction {
+        Delete,
+    }
+
+    private var pendingAction: PendingAction? = null
+    private var pendingDeleteIds: List<Long> = emptyList()
+
+    private val intentSenderLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            val action = pendingAction
+            pendingAction = null
+
+            if (result.resultCode != Activity.RESULT_OK || action == null) return@registerForActivityResult
+
+            when (action) {
+                PendingAction.Delete -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        onMediaItemsDeleted(pendingDeleteIds)
+                        parentFragmentManager.popBackStack()
+                    } else {
+                        startDelete(pendingDeleteIds)
+                    }
+                }
+            }
+        }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -129,7 +158,7 @@ class ImageFragment : Fragment() {
             parentFragmentManager.popBackStack()
         }
 
-        val buttonShare: Button = view.findViewById(R.id.buttonShare)
+        val buttonShare: ImageButton = view.findViewById(R.id.buttonShare)
         buttonShare.setOnClickListener {
             val sendIntent: Intent = Intent().apply {
                 action = Intent.ACTION_SEND
@@ -139,12 +168,76 @@ class ImageFragment : Fragment() {
             val shareIntent = Intent.createChooser(sendIntent, null)
             startActivity(shareIntent)
         }
+
+        val buttonDelete: ImageButton = view.findViewById(R.id.buttonDelete)
+        buttonDelete.setOnClickListener {
+            val id = imageId ?: return@setOnClickListener
+            startDelete(listOf(id))
+        }
         return view
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean("show_exif", showExif)
+    }
+
+    private fun startDelete(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        val ctx = context ?: return
+        val contentResolver = ctx.contentResolver
+        val uris = ids.map { Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it.toString()) }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val pendingIntent = MediaStore.createDeleteRequest(contentResolver, uris)
+            pendingAction = PendingAction.Delete
+            pendingDeleteIds = ids
+            intentSenderLauncher.launch(
+                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+            )
+            return
+        }
+
+        val deletedIds = mutableListOf<Long>()
+        for ((idx, uri) in uris.withIndex()) {
+            try {
+                val deleted = contentResolver.delete(uri, null, null)
+                if (deleted > 0) deletedIds.add(ids[idx])
+            } catch (e: SecurityException) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+                    e is RecoverableSecurityException
+                ) {
+                    pendingAction = PendingAction.Delete
+                    pendingDeleteIds = ids
+                    intentSenderLauncher.launch(
+                        IntentSenderRequest.Builder(e.userAction.actionIntent.intentSender).build()
+                    )
+                    return
+                }
+            }
+        }
+
+        if (deletedIds.isEmpty()) {
+            Toast.makeText(requireContext(), "No items were deleted", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        onMediaItemsDeleted(deletedIds)
+        parentFragmentManager.popBackStack()
+    }
+
+    private fun onMediaItemsDeleted(ids: List<Long>) {
+        val idSet = ids.toHashSet()
+        mORTImageViewModel.removeFromIndex(ids)
+        mSearchViewModel.searchResults =
+            mSearchViewModel.searchResults?.filterNot { idSet.contains(it) }
+        mSearchViewModel.selectedImageIds.removeAll(idSet)
+
+        // If the currently shown image was deleted, avoid trying to re-render it.
+        if (imageId != null && idSet.contains(imageId)) {
+            imageId = null
+            imageUri = null
+        }
     }
 
     private fun showAdjacentImage(delta: Int) {

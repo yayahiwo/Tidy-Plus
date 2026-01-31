@@ -43,23 +43,11 @@
                 android:typeface="normal" />
         </LinearLayout>
 
-        <LinearLayout
+        <Space
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="2"
-            android:gravity="center">
-
-            <Button
-                android:id="@+id/buttonShare"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="35dp"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:padding="2dp"
-                app:icon="?attr/actionModeShareDrawable"
-                app:iconSize="28dp" />
-
-        </LinearLayout>
+            tools:ignore="NestedWeights" />
 
     </LinearLayout>
 
@@ -169,6 +157,36 @@
             android:padding="12dp"
             android:scaleType="center"
             android:src="@drawable/ic_search"
+            android:tint="@color/tidy_icon_tint" />
+
+        <Space
+            android:layout_width="10dp"
+            android:layout_height="wrap_content" />
+
+        <ImageButton
+            android:id="@+id/buttonShare"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Share"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_share"
+            android:tint="@color/tidy_icon_tint" />
+
+        <Space
+            android:layout_width="10dp"
+            android:layout_height="wrap_content" />
+
+        <ImageButton
+            android:id="@+id/buttonDelete"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Delete"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_delete"
             android:tint="@color/tidy_icon_tint" />
 
     </LinearLayout>
