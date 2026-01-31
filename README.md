@@ -37,6 +37,6 @@
 
 <h2>Screenshots of the UI</h2>
 <div style="display:flex;">
-<img alt="Text-to-Image Search" src="res/tidy-plus-screens.jpg" width="100%">
+<img alt="Text-to-Image Search" src="[res/tidy-plus-screens.jpg](https://github.com/yayahiwo/Tidy-Plus/blob/main/res/Tidy_V0.8.4.jpg)" width="100%">
 </div>
 
