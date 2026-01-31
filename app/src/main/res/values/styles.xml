@@ -43,4 +43,13 @@
         <item name="backgroundTint">@android:color/transparent</item>
         <item name="cornerRadius">24dp</item>
     </style>
+
+    <style name="Widget.Tidy.SelectionActionButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+
+    <style name="Widget.Tidy.ImageBottomBarButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="iconTint">?attr/colorOnSurface</item>
+    </style>
 </resources>

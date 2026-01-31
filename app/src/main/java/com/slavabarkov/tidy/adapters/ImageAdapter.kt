@@ -43,6 +43,7 @@ class ImageAdapter(
         val checkBox: CheckBox = view.findViewById(R.id.item_checkbox)
         val selectionOverlay: View = view.findViewById(R.id.item_selection_overlay)
         val dimensionsText: TextView = view.findViewById(R.id.item_dimensions)
+        val expandButton: View = view.findViewById(R.id.item_expand)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ImageViewHolder {
@@ -90,6 +91,7 @@ class ImageAdapter(
         holder.checkBox.visibility = if (selectionMode) View.VISIBLE else View.GONE
         holder.checkBox.isChecked = isSelected
         holder.selectionOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
+        holder.expandButton.visibility = if (selectionMode) View.VISIBLE else View.GONE
 
         holder.checkBox.setOnClickListener {
             if (!selectionMode) {
@@ -98,6 +100,10 @@ class ImageAdapter(
             }
             toggleSelection(item)
             notifyItemChanged(position)
+        }
+
+        holder.expandButton.setOnClickListener {
+            openImageViewer(item, imageUri)
         }
 
         holder.imageView.setOnClickListener {
@@ -150,6 +156,25 @@ class ImageAdapter(
             notifyDataSetChanged()
         }
         onSelectionChanged?.invoke(selectedIds.size)
+    }
+
+    private fun openImageViewer(id: Long, imageUri: Uri) {
+        val arguments = Bundle()
+        arguments.putLong("image_id", id)
+        arguments.putString("image_uri", imageUri.toString())
+
+        val activity = context as? MainActivity
+        if (activity == null) {
+            Toast.makeText(context, "Unable to open image", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val transaction: FragmentTransaction = activity.supportFragmentManager.beginTransaction()
+        val fragment = ImageFragment()
+        fragment.arguments = arguments
+        transaction.replace(R.id.fragmentContainerView, fragment)
+        transaction.addToBackStack("image_fragment")
+        transaction.commit()
     }
 
     fun getSelectedIds(): Set<Long> = selectedIds.toSet()

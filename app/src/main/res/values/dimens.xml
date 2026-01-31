@@ -9,8 +9,9 @@
     <!-- Common paddings/margins -->
     <dimen name="tidy_screen_h_margin">12dp</dimen>
     <dimen name="tidy_text_field_inner_padding_start">12dp</dimen>
+    <!-- Search input inset: ~half of the 40dp text field height -->
+    <dimen name="tidy_search_input_inset_start">20dp</dimen>
     <dimen name="tidy_section_title_margin_top">8dp</dimen>
     <dimen name="tidy_section_block_margin_bottom">10dp</dimen>
     <dimen name="tidy_dialog_h_padding">24dp</dimen>
 </resources>
-

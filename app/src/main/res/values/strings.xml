@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">TIDY</string>
+    <string name="search_hint_example">Search</string>
 </resources>

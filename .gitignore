@@ -82,6 +82,10 @@ fastlane/readme.md
 # Version control
 vcs.xml
 
+# macOS
+.DS_Store
+**/.DS_Store
+
 # lint
 lint/intermediates/
 lint/generated/

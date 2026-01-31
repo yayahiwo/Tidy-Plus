@@ -1,0 +1,12 @@
+<resources>
+    <style name="Widget.Tidy.SelectionActionButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <!-- Light gray labels in dark theme -->
+        <item name="android:textColor">#B3FFFFFF</item>
+    </style>
+
+    <style name="Widget.Tidy.ImageBottomBarButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <!-- Light gray labels/icons in dark theme -->
+        <item name="android:textColor">#B3FFFFFF</item>
+        <item name="iconTint">#B3FFFFFF</item>
+    </style>
+</resources>

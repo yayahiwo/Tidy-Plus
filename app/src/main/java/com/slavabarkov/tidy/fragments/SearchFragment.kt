@@ -79,6 +79,7 @@ class SearchFragment : Fragment() {
     private var searchSubmitButton: ImageButton? = null
     private var searchChips: ChipGroup? = null
     private var searchInputScroll: android.widget.HorizontalScrollView? = null
+    private var searchInputRow: View? = null
     private var clearButton: ImageButton? = null
     private var topButtonsRow: View? = null
     private var resultsTitleText: TextView? = null
@@ -90,9 +91,9 @@ class SearchFragment : Fragment() {
     private var toolsButton: View? = null
     private var selectionActions: View? = null
     private var selectedCountText: TextView? = null
-    private var moveSelectedButton: Button? = null
-    private var deleteSelectedButton: Button? = null
-    private var clearSelectionButton: Button? = null
+    private var moveSelectedButton: ImageButton? = null
+    private var deleteSelectedButton: ImageButton? = null
+    private var clearSelectionButton: ImageButton? = null
     private var imageAdapter: ImageAdapter? = null
     private var scaleGestureDetector: ScaleGestureDetector? = null
     private var accumulatedScale: Float = 1.0f
@@ -208,6 +209,7 @@ class SearchFragment : Fragment() {
         searchText = view?.findViewById(R.id.searchText)
         searchChips = view?.findViewById(R.id.searchChips)
         searchInputScroll = view?.findViewById(R.id.searchInputScroll)
+        searchInputRow = view?.findViewById(R.id.searchInputRow)
         refreshSearchChips()
         val recyclerView = view?.findViewById<RecyclerView>(R.id.recycler_view)
 
@@ -271,10 +273,9 @@ class SearchFragment : Fragment() {
             val p = mORTImageViewModel.progress.value ?: 0.0
             val progressPercent: Int = (p * 100).toInt()
             reindexProgressBar?.progress = progressPercent
-            reindexProgressText?.text =
-                if (mSearchViewModel.indexPaused) "Indexing paused: ${progressPercent}%"
-                else "Updating image index: ${progressPercent}%"
-            reindexCountText?.text = "Indexed photos: ${mORTImageViewModel.indexedCount.value ?: 0}"
+            val count = mORTImageViewModel.indexedCount.value ?: 0
+            reindexProgressText?.text = buildIndexingStatusText(progressPercent, count, mSearchViewModel.indexPaused)
+            reindexCountText?.visibility = View.GONE
         }
         updateIndexingControls()
 
@@ -290,6 +291,7 @@ class SearchFragment : Fragment() {
         searchSubmitButton = view.findViewById(R.id.searchSubmitButton)
         searchChips = view.findViewById(R.id.searchChips)
         searchInputScroll = view.findViewById(R.id.searchInputScroll)
+        searchInputRow = view.findViewById(R.id.searchInputRow)
         refreshSearchChips()
         setupSearchAutocomplete()
 
@@ -337,7 +339,8 @@ class SearchFragment : Fragment() {
             val progressPercent: Int = (progress * 100).toInt()
             reindexProgressBar?.progress = progressPercent
             if (!mSearchViewModel.indexPaused) {
-                reindexProgressText?.text = "Updating image index: ${progressPercent}%"
+                val count = mORTImageViewModel.indexedCount.value ?: 0
+                reindexProgressText?.text = buildIndexingStatusText(progressPercent, count, false)
             }
             if (progress == 1.0) {
                 finishReindex()
@@ -346,7 +349,10 @@ class SearchFragment : Fragment() {
 
         mORTImageViewModel.indexedCount.observe(viewLifecycleOwner) { count ->
             if (!mSearchViewModel.pendingIndexRefresh) return@observe
-            reindexCountText?.text = "Indexed photos: $count"
+            val progressPercent: Int = ((mORTImageViewModel.progress.value ?: 0.0) * 100).toInt()
+            reindexProgressText?.text =
+                buildIndexingStatusText(progressPercent, count, mSearchViewModel.indexPaused)
+            reindexCountText?.visibility = View.GONE
         }
 
         mORTImageViewModel.isIndexing.observe(viewLifecycleOwner) { indexing ->
@@ -459,6 +465,7 @@ class SearchFragment : Fragment() {
         suppressAutocomplete = false
         searchTextView.dismissDropDown()
         searchInputScroll?.post { searchInputScroll?.fullScroll(View.FOCUS_RIGHT) }
+        updateSearchHint()
     }
 
     private fun addSearchToken(term: String): Boolean {
@@ -516,7 +523,27 @@ class SearchFragment : Fragment() {
         }
         // Keep the caret right after the last chip by scrolling to the end.
         scroll?.post { scroll.fullScroll(View.FOCUS_RIGHT) }
+        updateSearchHint()
         refreshSearchStartIcon()
+    }
+
+    private fun updateSearchHint() {
+        val searchTextView = searchText ?: return
+        val hasValues =
+            mSearchViewModel.textSearchTokens.isNotEmpty() ||
+                !searchTextView.text?.toString().orEmpty().isBlank()
+        searchTextView.hint = if (hasValues) null else getString(R.string.search_hint_example)
+        updateSearchInputPadding(hasValues)
+    }
+
+    private fun updateSearchInputPadding(hasValues: Boolean) {
+        val row = searchInputRow ?: return
+        val startPx = if (hasValues) {
+            0
+        } else {
+            resources.getDimensionPixelSize(R.dimen.tidy_search_input_inset_start)
+        }
+        row.setPaddingRelative(startPx, row.paddingTop, row.paddingEnd, row.paddingBottom)
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -648,9 +675,9 @@ class SearchFragment : Fragment() {
             SimilarityUiMode.NONE -> mSearchViewModel.getTextSimilarityThreshold()
         }
         label?.text = when (mode) {
-            SimilarityUiMode.IMAGE -> "Image search similarity threshold"
-            SimilarityUiMode.TEXT -> "Text search similarity threshold"
-            SimilarityUiMode.NONE -> "Text search similarity threshold"
+            SimilarityUiMode.IMAGE -> "Similarity"
+            SimilarityUiMode.TEXT -> "Similarity"
+            SimilarityUiMode.NONE -> "Similarity"
         }
 
         if (seekBar != null && valueText != null) {
@@ -672,6 +699,17 @@ class SearchFragment : Fragment() {
         autocompleteAdapter = adapter
         searchTextView.setAdapter(adapter)
         styleAutocompleteDropdown(searchTextView)
+        updateSearchHint()
+
+        // Keep the caret positioned after the last chip (end of the horizontal scroll area).
+        searchTextView.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                searchInputScroll?.post { searchInputScroll?.fullScroll(View.FOCUS_RIGHT) }
+            }
+        }
+        searchTextView.setOnClickListener {
+            searchInputScroll?.post { searchInputScroll?.fullScroll(View.FOCUS_RIGHT) }
+        }
 
         viewLifecycleOwner.lifecycleScope.launch {
             VocabAutocomplete.ensureLoaded(requireContext().applicationContext)
@@ -716,6 +754,7 @@ class SearchFragment : Fragment() {
 
             override fun afterTextChanged(s: Editable?) {
                 if (suppressAutocomplete) return
+                updateSearchHint()
                 refreshSearchStartIcon()
                 dismissAutocompleteIfPrefixTooShort(searchTextView)
             }
@@ -779,6 +818,7 @@ class SearchFragment : Fragment() {
         }
         mSearchViewModel.clearTextSearchTokens()
         refreshSearchChips()
+        updateSearchHint()
 
         mSearchViewModel.searchResults = mORTImageViewModel.idxList.reversed()
         mSearchViewModel.lastSearchIsImageSearch = false
@@ -896,7 +936,8 @@ class SearchFragment : Fragment() {
     private fun pauseReindex() {
         mSearchViewModel.indexPaused = true
         updateIndexingControls()
-        reindexProgressText?.text = "Stopping…"
+        val count = mORTImageViewModel.indexedCount.value ?: 0
+        reindexProgressText?.text = "Stopping… • $count"
         val job = mORTImageViewModel.cancelIndexing()
         lifecycleScope.launch {
             try {
@@ -940,8 +981,9 @@ class SearchFragment : Fragment() {
         val progressPercent: Int = (p * 100).toInt()
         reindexProgressContainer?.visibility = View.VISIBLE
         reindexProgressBar?.progress = progressPercent
-        reindexProgressText?.text = "Indexing paused: ${progressPercent}%"
-        reindexCountText?.text = "Indexed photos: ${mORTImageViewModel.indexedCount.value ?: 0}"
+        val count = mORTImageViewModel.indexedCount.value ?: 0
+        reindexProgressText?.text = buildIndexingStatusText(progressPercent, count, true)
+        reindexCountText?.visibility = View.GONE
 
         mSearchViewModel.lastSearchIsImageSearch = false
         mSearchViewModel.showBackToAllImages = false
@@ -1234,10 +1276,15 @@ class SearchFragment : Fragment() {
         updateIndexingControls()
         reindexProgressContainer?.visibility = View.VISIBLE
         reindexProgressBar?.progress = 0
-        reindexProgressText?.text = "Updating image index: 0%"
-        reindexCountText?.text = "Indexed photos: 0"
+        reindexProgressText?.text = buildIndexingStatusText(0, 0, false)
+        reindexCountText?.visibility = View.GONE
 
         mORTImageViewModel.generateIndex()
+    }
+
+    private fun buildIndexingStatusText(progressPercent: Int, indexedCount: Int, paused: Boolean): String {
+        val status = if (paused) "Indexing paused" else "Updating index"
+        return "$status: ${progressPercent}% • $indexedCount"
     }
 
     private fun finishReindex() {
@@ -2507,7 +2554,7 @@ class SearchFragment : Fragment() {
             else if (mSearchViewModel.lastResultsAreNearDuplicates) "Near duplicates"
             else "All images"
         resultsTitleText?.text = title
-        resultsCountText?.text = "Photos: ${results.size}"
+        resultsCountText?.text = "${results.size}"
 
         val showDimensions =
             (isImageSearch && mSearchViewModel.showImageSearchDimensions) ||
@@ -2520,7 +2567,7 @@ class SearchFragment : Fragment() {
             onSelectionChanged = { updateSelectionUI() },
             showDimensions = showDimensions,
             dimensionsById = mSearchViewModel.imageDimensionsById,
-            lowPriorityThumbnails = mSearchViewModel.pendingIndexRefresh
+            lowPriorityThumbnails = mSearchViewModel.pendingIndexRefresh,
         )
         recyclerView.adapter = imageAdapter
         updateSelectionUI()
@@ -2584,7 +2631,7 @@ class SearchFragment : Fragment() {
 
     private fun updateSelectionUI() {
         val count = mSearchViewModel.selectedImageIds.size
-        selectedCountText?.text = "Selected: $count"
+        selectedCountText?.text = "$count Selected"
         selectionActions?.visibility = if (count > 0) View.VISIBLE else View.GONE
     }
 

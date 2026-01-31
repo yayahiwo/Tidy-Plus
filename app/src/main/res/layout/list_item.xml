@@ -33,8 +33,22 @@
         android:layout_height="wrap_content"
         android:padding="8dp"
         android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="@id/item_image"
+        app:layout_constraintStart_toStartOf="@id/item_image"
         app:layout_constraintTop_toTopOf="@id/item_image" />
+
+    <ImageButton
+        android:id="@+id/item_expand"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:background="@drawable/bg_circle_ripple"
+        android:contentDescription="Expand"
+        android:padding="6dp"
+        android:scaleType="center"
+        android:src="@drawable/ic_expand_diagonal"
+        android:tint="?attr/colorOnSurface"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/item_image"
+        app:layout_constraintEnd_toEndOf="@id/item_image" />
 
     <TextView
         android:id="@+id/item_dimensions"

@@ -8,23 +8,34 @@
         tools:context=".fragments.SearchFragment"
         >
 
-    <TextView
-        android:id="@+id/resultsTitleText"
-        style="@style/Tidy.SectionTitle"
+    <LinearLayout
+        android:id="@+id/resultsHeaderRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/tidy_screen_h_margin"
+        android:layout_marginEnd="@dimen/tidy_screen_h_margin"
         android:layout_marginTop="@dimen/tidy_section_title_margin_top"
-        android:text="All images"
-        />
-
-    <TextView
-        android:id="@+id/resultsCountText"
-        style="@style/Tidy.SectionCount"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
         android:layout_marginBottom="@dimen/tidy_section_block_margin_bottom"
-        android:text="Photos: 0"
-        />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/resultsTitleText"
+            style="@style/Tidy.SectionTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="start"
+            android:text="All images" />
+
+        <TextView
+            android:id="@+id/resultsCountText"
+            style="@style/Tidy.SectionCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:text="0" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -37,6 +48,7 @@
 	        <LinearLayout
 	            android:layout_width="match_parent"
 	            android:layout_height="wrap_content"
+	            android:layout_marginBottom="@dimen/tidy_space_sm"
 	            android:paddingStart="@dimen/tidy_screen_h_margin"
 	            android:paddingEnd="@dimen/tidy_screen_h_margin"
 	            android:clipChildren="false"
@@ -88,6 +100,7 @@
 		                    app:layout_constraintTop_toTopOf="parent">
 
 		                    <LinearLayout
+		                        android:id="@+id/searchInputRow"
 		                        android:layout_width="match_parent"
 		                        android:layout_height="match_parent"
 		                        android:gravity="center_vertical"
@@ -111,7 +124,7 @@
 		                            android:layout_weight="1"
 		                            android:background="@null"
 		                            android:gravity="center_vertical"
-		                            android:hint="e.g. &quot;Black cat sitting on a table&quot;"
+		                            android:hint="@string/search_hint_example"
 		                            android:imeOptions="actionSearch"
 		                            android:inputType="textWebEditText|text"
 		                            android:paddingStart="0dp"
@@ -172,6 +185,7 @@
         android:id="@+id/imageSimilaritySection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/tidy_space_sm"
         android:orientation="vertical">
 
 	        <LinearLayout
@@ -221,7 +235,7 @@
 	            android:layout_width="match_parent"
 	            android:layout_height="wrap_content"
 	            android:gravity="center"
-	            android:text="Updating image index: 0%" />
+	            android:text="Updating index: 0% • 0" />
 
 	        <LinearLayout
 	            android:layout_width="match_parent"
@@ -259,7 +273,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="Indexed photos: 0" />
+            android:text="Indexed photos: 0"
+            android:visibility="gone" />
     </LinearLayout>
 
 	    <LinearLayout
@@ -279,34 +294,46 @@
             android:layout_weight="1"
             android:text="Selected: 0" />
 
-        <Button
+        <ImageButton
             android:id="@+id/moveSelectedButton"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Move" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Move selected"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_move"
+            android:tint="?attr/colorOnSurface" />
 
         <Space
             android:layout_width="8dp"
             android:layout_height="wrap_content" />
 
-        <Button
+        <ImageButton
             android:id="@+id/deleteSelectedButton"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Delete" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Delete selected"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_delete"
+            android:tint="?attr/colorOnSurface" />
 
         <Space
             android:layout_width="8dp"
             android:layout_height="wrap_content" />
 
-        <Button
+        <ImageButton
             android:id="@+id/clearSelectionButton"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Clear" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Clear selection"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_clear"
+            android:tint="?attr/colorOnSurface" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView

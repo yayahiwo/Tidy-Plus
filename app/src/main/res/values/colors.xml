@@ -9,4 +9,7 @@
     <color name="white">#FFFFFFFF</color>
 
     <color name="image_view_bg">#FFF3F3F3</color>
+
+    <!-- Icon tint for bottom action buttons (image screen), with night-mode override -->
+    <color name="tidy_icon_tint">#FF000000</color>
 </resources>

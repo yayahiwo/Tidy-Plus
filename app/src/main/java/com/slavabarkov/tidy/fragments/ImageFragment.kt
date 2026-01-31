@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.GridLayout
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.net.toUri
@@ -38,7 +39,7 @@ class ImageFragment : Fragment() {
     private var infoTextView: TextView? = null
     private var singleImageView: PhotoView? = null
     private var xmpTextView: TextView? = null
-    private var buttonExif: Button? = null
+    private var buttonExif: ImageButton? = null
     private var exifGrid: GridLayout? = null
     private var showExif: Boolean = false
     private var basicInfoText: String = ""
@@ -92,7 +93,7 @@ class ImageFragment : Fragment() {
         // Initial render
         imageId?.let { showImageById(it) }
 
-        val buttonBackToAllImages: Button = view.findViewById(R.id.buttonBackToAllImages)
+        val buttonBackToAllImages: ImageButton = view.findViewById(R.id.buttonBackToAllImages)
         buttonBackToAllImages.setOnClickListener {
             // Keep the current search/results state (text search, near-duplicates, image-to-image, etc.)
             // and simply go back to the grid.
@@ -104,7 +105,7 @@ class ImageFragment : Fragment() {
             updateInfoText()
         }
 
-        val buttonImage2Image: Button = view.findViewById(R.id.buttonImage2Image)
+        val buttonImage2Image: ImageButton = view.findViewById(R.id.buttonImage2Image)
         buttonImage2Image.setOnClickListener {
             imageId?.let {
                 val imageIndex = mORTImageViewModel.idxList.indexOf(it)

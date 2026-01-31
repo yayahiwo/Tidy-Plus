@@ -130,51 +130,46 @@
         android:orientation="horizontal"
         android:paddingTop="7dp">
 
-        <Button
+        <ImageButton
             android:id="@+id/buttonBackToAllImages"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:text="BACK"
-            app:icon="@drawable/ic_clear"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            app:iconTint="?attr/colorOnSurface" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Back"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_arrow_back"
+            android:tint="@color/tidy_icon_tint" />
 
         <Space
             android:layout_width="10dp"
             android:layout_height="wrap_content" />
 
-        <Button
+        <ImageButton
             android:id="@+id/buttonExif"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:contentDescription="EXIF"
-            android:minHeight="48dp"
-            android:minWidth="48dp"
-            android:text=""
-            app:icon="@drawable/ic_info"
-            app:iconPadding="0dp"
-            app:iconSize="20dp"
-            app:iconTint="?attr/colorOnSurface" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Info"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_info"
+            android:tint="@color/tidy_icon_tint" />
 
         <Space
             android:layout_width="10dp"
             android:layout_height="wrap_content" />
 
-        <Button
+        <ImageButton
             android:id="@+id/buttonImage2Image"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:text="Find Similar"
-            app:icon="@drawable/ic_search"
-            app:iconPadding="8dp"
-            app:iconSize="20dp"
-            app:iconTint="?attr/colorOnSurface" />
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_circle_ripple"
+            android:contentDescription="Find similar"
+            android:padding="12dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_search"
+            android:tint="@color/tidy_icon_tint" />
 
     </LinearLayout>
 
